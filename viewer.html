@@ -6,6 +6,7 @@
     <title>PDF OCR Viewer</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- MathJax for LaTeX rendering -->
     <script>
         MathJax = {
@@ -184,6 +185,64 @@
         }
         .sidebar-panel.active {
             display: block;
+        }
+        #markdown-panel {
+            padding: 15px;
+            overflow-y: auto;
+        }
+        .markdown-body {
+            color: #e0e0e0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3,
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+            color: #fff;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            border-bottom: 1px solid #333;
+            padding-bottom: 0.3em;
+        }
+        .markdown-body h1 { font-size: 1.8em; }
+        .markdown-body h2 { font-size: 1.5em; }
+        .markdown-body h3 { font-size: 1.3em; }
+        .markdown-body p { margin: 0.8em 0; }
+        .markdown-body img {
+            max-width: 100%;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .markdown-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+            font-size: 13px;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #444;
+            padding: 8px;
+            text-align: left;
+        }
+        .markdown-body th {
+            background: #1a1a2e;
+        }
+        .markdown-body code {
+            background: #1a1a2e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        .markdown-body pre {
+            background: #1a1a2e;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .markdown-body blockquote {
+            border-left: 3px solid #3498db;
+            margin: 1em 0;
+            padding-left: 15px;
+            color: #aaa;
         }
         .sidebar h3 {
             font-size: 11px;
@@ -737,6 +796,7 @@
         <div class="sidebar-tabs">
             <button class="sidebar-tab active" onclick="showSidebarPanel('pages')">Pages</button>
             <button class="sidebar-tab" onclick="showSidebarPanel('sections')">Sections</button>
+            <button class="sidebar-tab" onclick="showSidebarPanel('markdown')">Markdown</button>
         </div>
         <div class="sidebar-content">
             <div id="pages-panel" class="sidebar-panel active">
@@ -744,6 +804,9 @@
             </div>
             <div id="sections-panel" class="sidebar-panel">
                 <div id="section-list"></div>
+            </div>
+            <div id="markdown-panel" class="sidebar-panel">
+                <div id="markdown-content" class="markdown-body"></div>
             </div>
         </div>
     </div>
@@ -886,7 +949,24 @@
 
             renderPageList();
             renderSectionList();
+            loadMarkdown();
             showPage(1);
+        }
+
+        async function loadMarkdown() {
+            try {
+                const response = await fetch('document.md');
+                if (!response.ok) throw new Error('Markdown not found');
+                const markdown = await response.text();
+                const html = marked.parse(markdown);
+                document.getElementById('markdown-content').innerHTML = html;
+                // Trigger MathJax if available
+                if (typeof MathJax !== 'undefined' && MathJax.typeset) {
+                    MathJax.typeset([document.getElementById('markdown-content')]);
+                }
+            } catch (err) {
+                document.getElementById('markdown-content').innerHTML = '<p style="color: #888;">Could not load markdown file.</p>';
+            }
         }
 
         async function downloadMarkdown() {
