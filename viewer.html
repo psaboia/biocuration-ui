@@ -880,7 +880,7 @@
             });
 
             // Set document title from first section or filename
-            const docTitle = documentData.sections?.[0]?.title || 'Untitled Document';
+            const docTitle = documentData.sections?.[0]?.name || documentData.sections?.[0]?.title || 'Untitled Document';
             document.getElementById('document-title').textContent = docTitle;
             document.getElementById('document-title').title = docTitle; // Full title on hover
 
