@@ -1,0 +1,129 @@
+{
+  "headings": [
+    {
+      "number": 1,
+      "matter": "front",
+      "level": "label"
+    },
+    {
+      "number": 2,
+      "matter": "front",
+      "level": "title"
+    },
+    {
+      "number": 3,
+      "matter": "front",
+      "level": "label"
+    },
+    {
+      "number": 4,
+      "matter": "front",
+      "level": "section"
+    },
+    {
+      "number": 5,
+      "matter": "front",
+      "level": "subsection"
+    },
+    {
+      "number": 6,
+      "matter": "front",
+      "level": "subsection"
+    },
+    {
+      "number": 7,
+      "matter": "front",
+      "level": "subsection"
+    },
+    {
+      "number": 8,
+      "matter": "body",
+      "level": "section"
+    },
+    {
+      "number": 9,
+      "matter": "body",
+      "level": "section"
+    },
+    {
+      "number": 10,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 11,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 12,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 13,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 14,
+      "matter": "body",
+      "level": "section"
+    },
+    {
+      "number": 15,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 16,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 17,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 18,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 19,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 20,
+      "matter": "body",
+      "level": "subsection"
+    },
+    {
+      "number": 21,
+      "matter": "body",
+      "level": "section"
+    },
+    {
+      "number": 22,
+      "matter": "back",
+      "level": "section"
+    },
+    {
+      "number": 23,
+      "matter": "back",
+      "level": "section"
+    },
+    {
+      "number": 24,
+      "matter": "back",
+      "level": "section"
+    },
+    {
+      "number": 25,
+      "matter": "back",
+      "level": "section"
+    }
+  ]
+}

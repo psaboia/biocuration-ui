@@ -1,0 +1,179 @@
+{
+  "headings": [
+    {
+      "number": 1,
+      "sequence": 1,
+      "type": "title",
+      "text": "RESEARCH ARTICLE",
+      "element_id": 1
+    },
+    {
+      "number": 2,
+      "sequence": 1,
+      "type": "title",
+      "text": "Parity and Longevity of Aedes aegypti According to Temperatures in Controlled Conditions and Consequences on Dengue Transmission Risks",
+      "element_id": 2
+    },
+    {
+      "number": 3,
+      "sequence": 1,
+      "type": "sub_title",
+      "text": "OPEN ACCESS",
+      "element_id": 6
+    },
+    {
+      "number": 4,
+      "sequence": 1,
+      "type": "sub_title",
+      "text": "Abstract",
+      "element_id": 15
+    },
+    {
+      "number": 5,
+      "sequence": 1,
+      "type": "sub_title",
+      "text": "Background",
+      "element_id": 16
+    },
+    {
+      "number": 6,
+      "sequence": 1,
+      "type": "sub_title",
+      "text": "Methodology/Principal Findings",
+      "element_id": 18
+    },
+    {
+      "number": 7,
+      "sequence": 2,
+      "type": "sub_title",
+      "text": "Conclusion",
+      "element_id": 22
+    },
+    {
+      "number": 8,
+      "sequence": 2,
+      "type": "sub_title",
+      "text": "Introduction",
+      "element_id": 24
+    },
+    {
+      "number": 9,
+      "sequence": 4,
+      "type": "sub_title",
+      "text": "Materials and Methods",
+      "element_id": 34
+    },
+    {
+      "number": 10,
+      "sequence": 4,
+      "type": "sub_title",
+      "text": "Mosquito Collection",
+      "element_id": 35
+    },
+    {
+      "number": 11,
+      "sequence": 4,
+      "type": "sub_title",
+      "text": "Experimental study of the gonotrophic cycles, fecundity and survival of females",
+      "element_id": 37
+    },
+    {
+      "number": 12,
+      "sequence": 5,
+      "type": "sub_title",
+      "text": "Observation of the ovarian development during the gonotrophic cycle",
+      "element_id": 40
+    },
+    {
+      "number": 13,
+      "sequence": 5,
+      "type": "sub_title",
+      "text": "Data analysis",
+      "element_id": 42
+    },
+    {
+      "number": 14,
+      "sequence": 6,
+      "type": "sub_title",
+      "text": "Results",
+      "element_id": 52
+    },
+    {
+      "number": 15,
+      "sequence": 6,
+      "type": "sub_title",
+      "text": "Evolution of the parity rates",
+      "element_id": 53
+    },
+    {
+      "number": 16,
+      "sequence": 9,
+      "type": "sub_title",
+      "text": "Duration and number of gonotrophic cycles",
+      "element_id": 65
+    },
+    {
+      "number": 17,
+      "sequence": 10,
+      "type": "sub_title",
+      "text": "Fecundity",
+      "element_id": 73
+    },
+    {
+      "number": 18,
+      "sequence": 11,
+      "type": "sub_title",
+      "text": "Survival of females",
+      "element_id": 78
+    },
+    {
+      "number": 19,
+      "sequence": 13,
+      "type": "sub_title",
+      "text": "Expectancy of infective life and transmission risk according to parity rates",
+      "element_id": 92
+    },
+    {
+      "number": 20,
+      "sequence": 14,
+      "type": "sub_title",
+      "text": "Observation of ovaries during the egg maturation",
+      "element_id": 98
+    },
+    {
+      "number": 21,
+      "sequence": 15,
+      "type": "sub_title",
+      "text": "Discussion",
+      "element_id": 104
+    },
+    {
+      "number": 22,
+      "sequence": 18,
+      "type": "sub_title",
+      "text": "Supporting Information",
+      "element_id": 125
+    },
+    {
+      "number": 23,
+      "sequence": 19,
+      "type": "sub_title",
+      "text": "Acknowledgments",
+      "element_id": 138
+    },
+    {
+      "number": 24,
+      "sequence": 19,
+      "type": "sub_title",
+      "text": "Author Contributions",
+      "element_id": 140
+    },
+    {
+      "number": 25,
+      "sequence": 19,
+      "type": "sub_title",
+      "text": "References",
+      "element_id": 142
+    }
+  ]
+}

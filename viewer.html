@@ -1,0 +1,2065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF OCR Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <!-- MathJax for LaTeX rendering -->
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+    <script>
+        // Custom Chart.js plugin for error bars (vertical and horizontal)
+        const errorBarsPlugin = {
+            id: 'errorBars',
+            afterDatasetsDraw(chart, args, options) {
+                const { ctx, data, scales } = chart;
+
+                data.datasets.forEach((dataset, datasetIndex) => {
+                    const hasVertical = dataset.errorBars || dataset.errorBarsMap;
+                    const hasHorizontal = dataset.errorBarsHoriz;
+                    if (!hasVertical && !hasHorizontal) return;
+
+                    const meta = chart.getDatasetMeta(datasetIndex);
+                    if (meta.hidden) return;
+
+                    ctx.save();
+                    ctx.strokeStyle = dataset.errorBarColor || '#000';
+                    ctx.lineWidth = dataset.errorBarLineWidth || 1.5;
+
+                    const xScale = scales.x;
+                    const yScale = scales.y;
+
+                    // Iterate through data indices - use dataIndex directly
+                    dataset.data.forEach((dataPoint, dataIndex) => {
+                        // Skip null/undefined data points
+                        if (dataPoint == null) return;
+
+                        // Handle both {x, y} objects and plain number values
+                        const yValue = typeof dataPoint === 'object' ? dataPoint.y : dataPoint;
+                        const xValue = typeof dataPoint === 'object' ? (dataPoint.x ?? dataIndex) : dataIndex;
+
+                        // Skip if no valid y value
+                        if (yValue == null) return;
+
+                        // Get the corresponding bar element - use dataIndex directly
+                        const element = meta.data[dataIndex];
+                        if (!element || element.x == null || element.y == null) return;
+
+                        const x = element.x;
+                        const y = element.y;
+
+                        // Draw vertical error bars - check both array and map formats
+                        const vertErr = dataset.errorBarsMap?.[dataIndex] || dataset.errorBars?.[dataIndex];
+                        if (vertErr) {
+                            const yPlus = yScale.getPixelForValue(yValue + vertErr.plus);
+                            const yMinus = yScale.getPixelForValue(yValue - vertErr.minus);
+
+                            // Vertical line
+                            ctx.beginPath();
+                            ctx.moveTo(x, yPlus);
+                            ctx.lineTo(x, yMinus);
+                            ctx.stroke();
+
+                            // Caps - use smaller width for cleaner look
+                            const capWidth = element.width ? element.width * 0.25 : 4;
+                            ctx.beginPath();
+                            ctx.moveTo(x - capWidth, yPlus);
+                            ctx.lineTo(x + capWidth, yPlus);
+                            ctx.stroke();
+
+                            ctx.beginPath();
+                            ctx.moveTo(x - capWidth, yMinus);
+                            ctx.lineTo(x + capWidth, yMinus);
+                            ctx.stroke();
+                        }
+
+                        // Draw horizontal error bars
+                        const horizErr = dataset.errorBarsHoriz?.[dataIndex];
+                        if (horizErr && xScale) {
+                            const xPlus = xScale.getPixelForValue(xValue + horizErr.plus);
+                            const xMinus = xScale.getPixelForValue(xValue - horizErr.minus);
+
+                            // Horizontal line
+                            ctx.beginPath();
+                            ctx.moveTo(xPlus, y);
+                            ctx.lineTo(xMinus, y);
+                            ctx.stroke();
+
+                            // Caps - use smaller height for cleaner look
+                            const capHeight = 4;
+                            ctx.beginPath();
+                            ctx.moveTo(xPlus, y - capHeight);
+                            ctx.lineTo(xPlus, y + capHeight);
+                            ctx.stroke();
+
+                            ctx.beginPath();
+                            ctx.moveTo(xMinus, y - capHeight);
+                            ctx.lineTo(xMinus, y + capHeight);
+                            ctx.stroke();
+                        }
+                    });
+
+                    ctx.restore();
+                });
+            }
+        };
+
+        // Register the plugin globally
+        Chart.register(errorBarsPlugin);
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 250px;
+            min-width: 150px;
+            max-width: 500px;
+            background: #16213e;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .sidebar-resizer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            background: #0f3460;
+            cursor: ew-resize;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+        .sidebar-resizer:hover,
+        .sidebar-resizer.dragging {
+            background: #e94560;
+        }
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid #0f3460;
+        }
+        .sidebar-tab {
+            flex: 1;
+            padding: 12px;
+            background: #0f3460;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        .sidebar-tab.active {
+            background: #16213e;
+            color: #e94560;
+        }
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .sidebar-panel {
+            display: none;
+        }
+        .sidebar-panel.active {
+            display: block;
+        }
+        .sidebar h3 {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .page-btn {
+            display: block;
+            width: 100%;
+            padding: 8px 10px;
+            margin-bottom: 4px;
+            background: #0f3460;
+            border: none;
+            color: #eee;
+            cursor: pointer;
+            border-radius: 5px;
+            text-align: left;
+            font-size: 12px;
+        }
+        .page-btn:hover, .page-btn.active {
+            background: #e94560;
+        }
+        .page-btn .badge {
+            float: right;
+            background: #e94560;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        .page-btn.active .badge {
+            background: #0f3460;
+        }
+        /* Section outline styles */
+        .section-item {
+            padding: 6px 8px;
+            margin-bottom: 2px;
+            background: #0f3460;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            border-left: 3px solid transparent;
+        }
+        .section-item:hover {
+            background: #1a3a5c;
+        }
+        .section-item.active {
+            border-left-color: #e94560;
+            background: #1a3a5c;
+        }
+        .section-item.on-page {
+            background: #1a3a5c;
+            box-shadow: inset 0 0 0 1px rgba(233, 69, 96, 0.3);
+        }
+        .section-item.front { border-left-color: #9b59b6; }
+        .section-item.body { border-left-color: #3498db; }
+        .section-item.back { border-left-color: #27ae60; }
+        .section-item .section-name {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .section-item .section-pages {
+            font-size: 10px;
+            color: #888;
+        }
+        .section-item.level-subsection {
+            margin-left: 12px;
+            font-size: 10px;
+        }
+        .section-item.level-title {
+            font-weight: bold;
+            background: #1a3a5c;
+        }
+        .matter-group {
+            margin-bottom: 15px;
+        }
+        .matter-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            padding: 4px 0;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .matter-label.front { color: #9b59b6; }
+        .matter-label.body { color: #3498db; }
+        .matter-label.back { color: #27ae60; }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .header {
+            padding: 12px 20px;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 16px;
+            color: #e94560;
+        }
+        .controls {
+            display: flex;
+            gap: 8px;
+        }
+        .controls button {
+            padding: 6px 12px;
+            background: #0f3460;
+            border: none;
+            color: #eee;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .controls button:hover {
+            background: #e94560;
+        }
+        /* Section label bar */
+        .section-bar {
+            padding: 8px 20px;
+            background: #0f3460;
+            border-bottom: 1px solid #1a1a2e;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+        }
+        .section-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .section-breadcrumb .matter-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .section-breadcrumb .matter-badge.front { background: #9b59b6; }
+        .section-breadcrumb .matter-badge.body { background: #3498db; }
+        .section-breadcrumb .matter-badge.back { background: #27ae60; }
+        .section-breadcrumb .separator {
+            color: #666;
+        }
+        .section-breadcrumb .section-name {
+            color: #ccc;
+        }
+        .section-breadcrumb .subsection-name {
+            color: #888;
+        }
+        .legend {
+            padding: 8px 15px;
+            background: #0f3460;
+            display: flex;
+            gap: 15px;
+            font-size: 11px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+        .legend-color.image {
+            background: rgba(46, 204, 113, 0.6);
+            border: 2px solid rgb(46, 204, 113);
+        }
+        .legend-color.table {
+            background: rgba(52, 152, 219, 0.6);
+            border: 2px solid rgb(52, 152, 219);
+        }
+        .zoom-info {
+            font-size: 11px;
+            color: #888;
+        }
+        .viewer {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .image-container {
+            flex: 1;
+            overflow: auto;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .page-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        .page-wrapper img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        .overlay {
+            position: absolute;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .overlay.image {
+            border-color: rgba(46, 204, 113, 0.6);
+            background: rgba(46, 204, 113, 0.1);
+        }
+        .overlay.table {
+            border-color: rgba(52, 152, 219, 0.6);
+            background: rgba(52, 152, 219, 0.1);
+        }
+        .overlay:hover {
+            border-width: 3px;
+        }
+        .overlay.image:hover {
+            background: rgba(46, 204, 113, 0.3);
+            border-color: rgba(46, 204, 113, 1);
+        }
+        .overlay.table:hover {
+            background: rgba(52, 152, 219, 0.3);
+            border-color: rgba(52, 152, 219, 1);
+        }
+        .overlay .label {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
+            white-space: nowrap;
+        }
+        .overlay.image .label {
+            background: rgba(46, 204, 113, 0.9);
+        }
+        .overlay.table .label {
+            background: rgba(52, 152, 219, 0.9);
+        }
+        /* Section markers on page */
+        .section-marker {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            pointer-events: none;
+        }
+        .section-marker::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            height: 2px;
+        }
+        .section-marker.front::before { background: linear-gradient(90deg, #9b59b6 0%, transparent 100%); }
+        .section-marker.body::before { background: linear-gradient(90deg, #3498db 0%, transparent 100%); }
+        .section-marker.back::before { background: linear-gradient(90deg, #27ae60 0%, transparent 100%); }
+        .section-marker .marker-label {
+            position: absolute;
+            left: -5px;
+            top: -10px;
+            transform: translateX(-100%);
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
+            white-space: nowrap;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .section-marker.front .marker-label { background: rgba(155, 89, 182, 0.9); }
+        .section-marker.body .marker-label { background: rgba(52, 152, 219, 0.9); }
+        .section-marker.back .marker-label { background: rgba(39, 174, 96, 0.9); }
+        .info-panel {
+            width: 650px;
+            min-width: 400px;
+            max-width: 1000px;
+            background: #16213e;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .info-resizer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            background: #0f3460;
+            cursor: ew-resize;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+        .info-resizer:hover,
+        .info-resizer.dragging {
+            background: #e94560;
+        }
+        .info-header {
+            padding: 8px 12px;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .info-header h3 {
+            font-size: 13px;
+            color: #e94560;
+        }
+        .info-header .unpin-btn {
+            background: #e94560;
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+            display: none;
+        }
+        .info-header .unpin-btn.visible {
+            display: inline-block;
+        }
+        .info-tabs {
+            display: flex;
+            border-bottom: 1px solid #0f3460;
+        }
+        .info-tab {
+            flex: 1;
+            padding: 8px;
+            background: #0f3460;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .info-tab.active {
+            background: #16213e;
+            color: #e94560;
+        }
+        .info-tab.disabled {
+            color: #444;
+            cursor: not-allowed;
+        }
+        .info-tab-content {
+            display: none;
+            padding: 12px;
+        }
+        .info-tab-content.active {
+            display: block;
+        }
+        .info-content {
+            flex: 1;
+            overflow: auto;
+        }
+        .info-content.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-style: italic;
+            font-size: 12px;
+            padding: 12px;
+        }
+        .overlay.pinned {
+            border-width: 3px;
+            box-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+        }
+        .overlay.pinned.image {
+            border-color: rgba(46, 204, 113, 1);
+        }
+        .overlay.pinned.table {
+            border-color: rgba(52, 152, 219, 1);
+        }
+        .parsed-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            color: #333;
+        }
+        .parsed-table th, .parsed-table td {
+            border: 1px solid #ddd;
+            padding: 6px;
+            text-align: left;
+        }
+        .parsed-table th {
+            background: #3498db;
+            color: white;
+        }
+        .parsed-table tr:nth-child(even) {
+            background: #f5f5f5;
+        }
+        .description {
+            line-height: 1.5;
+            font-size: 12px;
+        }
+        .figure-meta {
+            background: #0f3460;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 12px;
+        }
+        .figure-type {
+            display: inline-block;
+            background: #e94560;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        .figure-description {
+            font-size: 12px;
+            line-height: 1.4;
+            color: #ccc;
+            margin-top: 6px;
+        }
+
+        .element-captions {
+            background: rgba(52, 152, 219, 0.1);
+            border-left: 3px solid #3498db;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .caption-item {
+            font-size: 12px;
+            line-height: 1.5;
+            color: #ddd;
+            margin-bottom: 6px;
+        }
+
+        .caption-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .caption-label {
+            font-weight: 600;
+            color: #3498db;
+        }
+        .section-divider {
+            border-top: 1px solid #0f3460;
+            margin: 12px 0;
+            padding-top: 8px;
+        }
+        .section-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        /* Chart data styles */
+        .chart-data {
+            background: #0a1628;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        .chart-meta {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 10px;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+        .chart-meta-label {
+            color: #888;
+        }
+        .chart-meta-value {
+            color: #ccc;
+        }
+        .chart-series {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #1a3a5c;
+        }
+        .chart-series-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .chart-series-name {
+            font-size: 11px;
+            font-weight: bold;
+            color: #e94560;
+        }
+        .chart-series-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            border: 1px solid #444;
+        }
+        .chart-series-count {
+            font-size: 10px;
+            color: #888;
+        }
+        .chart-data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            margin-top: 6px;
+        }
+        .chart-data-table th {
+            background: #1a3a5c;
+            color: #888;
+            padding: 4px 6px;
+            text-align: left;
+            font-weight: normal;
+        }
+        .chart-data-table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid #1a3a5c;
+            color: #ccc;
+        }
+        .chart-data-table tr:nth-child(even) {
+            background: rgba(15, 52, 96, 0.2);
+        }
+        .chart-toggle {
+            background: #1a3a5c;
+            border: none;
+            color: #888;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+            margin-top: 6px;
+        }
+        .chart-toggle:hover {
+            background: #2a4a6c;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-resizer" id="sidebar-resizer"></div>
+        <div class="sidebar-tabs">
+            <button class="sidebar-tab active" onclick="showSidebarPanel('pages')">Pages</button>
+            <button class="sidebar-tab" onclick="showSidebarPanel('sections')">Sections</button>
+        </div>
+        <div class="sidebar-content">
+            <div id="pages-panel" class="sidebar-panel active">
+                <div id="page-list"></div>
+            </div>
+            <div id="sections-panel" class="sidebar-panel">
+                <div id="section-list"></div>
+            </div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="header">
+            <div style="display: flex; align-items: center; gap: 15px; flex: 1; min-width: 0;">
+                <h1 style="margin: 0; white-space: nowrap;">PDF OCR Viewer</h1>
+                <span id="document-title" style="color: #aaa; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+            </div>
+            <div class="controls">
+                <button onclick="downloadMarkdown()" title="Download Markdown + Images (ZIP)" style="background: #27ae60;">↓ ZIP</button>
+                <button onclick="zoomOut()">-</button>
+                <span class="zoom-info" id="zoom-level">100%</span>
+                <button onclick="zoomIn()">+</button>
+                <button onclick="prevPage()">← Prev</button>
+                <button onclick="nextPage()">Next →</button>
+            </div>
+        </div>
+        <div class="section-bar">
+            <div class="section-breadcrumb" id="section-breadcrumb">
+                <span class="matter-badge">-</span>
+                <span class="section-name">Loading...</span>
+            </div>
+        </div>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color image"></div>
+                <span>Figure</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color table"></div>
+                <span>Table</span>
+            </div>
+            <div class="legend-item" style="margin-left: 15px; border-left: 1px solid #1a1a2e; padding-left: 15px;">
+                <div style="width: 20px; height: 3px; background: linear-gradient(90deg, #9b59b6, #3498db, #27ae60); border-radius: 2px;"></div>
+                <span>Section start</span>
+            </div>
+            <span style="margin-left: auto; color: #666;">Hover over elements for details</span>
+        </div>
+        <div class="viewer">
+            <div class="image-container">
+                <div class="page-wrapper" id="page-wrapper">
+                    <img id="page-image" src="" alt="Page">
+                </div>
+            </div>
+            <div class="info-panel" id="info-panel">
+                <div class="info-resizer" id="info-resizer"></div>
+                <div class="info-header">
+                    <h3 id="info-title">Element Details</h3>
+                    <button class="unpin-btn" id="unpin-btn" onclick="unpinElement()">✕ Unpin</button>
+                </div>
+                <div class="info-tabs" id="info-tabs" style="display: none;">
+                    <button class="info-tab active" data-tab="description" onclick="showInfoTab('description')">Description</button>
+                    <button class="info-tab" data-tab="chart" onclick="showInfoTab('chart')">Chart Data</button>
+                    <button class="info-tab" data-tab="visual" onclick="showInfoTab('visual')">Replotted</button>
+                </div>
+                <div class="info-content" id="info-content">
+                    <div class="info-tab-content active" id="tab-description"></div>
+                    <div class="info-tab-content" id="tab-chart"></div>
+                    <div class="info-tab-content" id="tab-visual" style="min-height: 400px;">
+                        <div style="width: 100%; height: 400px;"><canvas id="replot-canvas"></canvas></div>
+                    </div>
+                    <div class="empty-message" style="display: flex; align-items: center; justify-content: center; color: #666; font-style: italic; font-size: 12px; height: 100%;">
+                        Click on a figure or table to pin its details
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let documentData = null;
+        let currentPage = 1;
+        let zoom = 1;
+        let imageNaturalWidth = 0;
+        let imageNaturalHeight = 0;
+        let pinnedElement = null;
+        let pinnedOverlay = null;
+        let replotCharts = []; // Array for multiple charts
+        let captionMap = new Map(); // Maps global element index to caption elements
+
+        async function loadData() {
+            const response = await fetch('processed_document.json');
+            documentData = await response.json();
+
+            // Build caption map - track global element indices
+            let globalIndex = 1;
+            documentData.pages.forEach(page => {
+                const pageMarkdown = page.markdown_content || '';
+
+                page.elements.forEach(elem => {
+                    elem._globalIndex = globalIndex;
+                    const elemType = elem.element_type || elem.raw_type;
+                    if (elemType === 'image_caption' || elemType === 'table_caption' || elemType === 'table_footnote') {
+                        const parentId = elem.parent_id;
+                        if (parentId) {
+                            if (!captionMap.has(parentId)) {
+                                captionMap.set(parentId, []);
+                            }
+                            // Try to get caption text from element, or extract from page markdown
+                            let captionText = elem.text || elem.ocr_contents || elem.parsed_content || '';
+
+                            // If no text in element, try to extract from markdown
+                            if (!captionText && pageMarkdown) {
+                                // Look for <center>...</center> tags (figure captions)
+                                const centerMatches = pageMarkdown.match(/<center>([^<]+)<\/center>/g);
+                                if (centerMatches && elemType === 'image_caption') {
+                                    // Get the caption index within this page's captions
+                                    const captionIdx = page.elements
+                                        .slice(0, page.elements.indexOf(elem))
+                                        .filter(e => (e.element_type || e.raw_type) === 'image_caption').length;
+                                    if (centerMatches[captionIdx]) {
+                                        captionText = centerMatches[captionIdx].replace(/<\/?center>/g, '').trim();
+                                    }
+                                }
+                                // Look for bold text before tables (table captions)
+                                if (elemType === 'table_caption') {
+                                    const tableMatches = pageMarkdown.match(/\*\*([^*]+)\*\*/g);
+                                    if (tableMatches) {
+                                        // Table captions are usually the first bold text
+                                        captionText = tableMatches[0]?.replace(/\*\*/g, '').trim() || '';
+                                    }
+                                }
+                            }
+
+                            captionMap.get(parentId).push({
+                                type: elemType,
+                                content: captionText
+                            });
+                        }
+                    }
+                    globalIndex++;
+                });
+            });
+
+            // Set document title from first section or filename
+            const docTitle = documentData.sections?.[0]?.title || 'Untitled Document';
+            document.getElementById('document-title').textContent = docTitle;
+            document.getElementById('document-title').title = docTitle; // Full title on hover
+
+            renderPageList();
+            renderSectionList();
+            showPage(1);
+        }
+
+        async function downloadMarkdown() {
+            const btn = document.querySelector('button[onclick="downloadMarkdown()"]');
+            const originalText = btn.textContent;
+            btn.textContent = '⏳';
+            btn.disabled = true;
+
+            try {
+                const zip = new JSZip();
+
+                // Add markdown file
+                const mdResponse = await fetch('document.md');
+                if (!mdResponse.ok) throw new Error('Markdown file not found');
+                const markdown = await mdResponse.text();
+                zip.file('document.md', markdown);
+
+                // Find all image references in markdown and add them
+                const imageMatches = markdown.matchAll(/!\[.*?\]\((images\/[^)]+)\)/g);
+                const imageFolder = zip.folder('images');
+                const imagePaths = [...new Set([...imageMatches].map(m => m[1]))];
+
+                for (const imagePath of imagePaths) {
+                    try {
+                        const imgResponse = await fetch(imagePath);
+                        if (imgResponse.ok) {
+                            const imgBlob = await imgResponse.blob();
+                            const fileName = imagePath.split('/').pop();
+                            imageFolder.file(fileName, imgBlob);
+                        }
+                    } catch (e) {
+                        console.warn('Could not fetch image:', imagePath);
+                    }
+                }
+
+                // Generate and download ZIP
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'document.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                alert('Could not download: ' + err.message);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function showSidebarPanel(panel) {
+            document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+            document.querySelector(`.sidebar-tab[onclick*="${panel}"]`).classList.add('active');
+            document.getElementById(`${panel}-panel`).classList.add('active');
+        }
+
+        function renderPageList() {
+            const list = document.getElementById('page-list');
+            list.innerHTML = '';
+
+            documentData.pages.forEach(page => {
+                const parsedCount = page.elements.filter(e => e.parsed_content || e.figure_type).length;
+                const btn = document.createElement('button');
+                btn.className = 'page-btn';
+                btn.innerHTML = `Page ${page.sequence_number}`;
+                if (parsedCount > 0) {
+                    btn.innerHTML += `<span class="badge">${parsedCount}</span>`;
+                }
+                btn.onclick = () => showPage(page.sequence_number);
+                list.appendChild(btn);
+            });
+        }
+
+        function renderSectionList() {
+            const list = document.getElementById('section-list');
+            list.innerHTML = '';
+
+            const matters = ['front', 'body', 'back'];
+            const matterLabels = { front: 'Front Matter', body: 'Body', back: 'Back Matter' };
+
+            matters.forEach(matter => {
+                const sections = documentData.sections.filter(s => s.matter === matter);
+                if (sections.length === 0) return;
+
+                const group = document.createElement('div');
+                group.className = 'matter-group';
+
+                const label = document.createElement('div');
+                label.className = `matter-label ${matter}`;
+                label.textContent = matterLabels[matter];
+                group.appendChild(label);
+
+                sections.forEach(section => {
+                    const item = document.createElement('div');
+                    item.className = `section-item ${matter} level-${section.level}`;
+                    item.dataset.sectionId = section.id;
+                    item.dataset.startPage = section.start_page;
+                    item.dataset.endPage = section.end_page;
+                    item.innerHTML = `
+                        <span class="section-name" title="${section.name}">${section.name}</span>
+                        <span class="section-pages">pp. ${section.start_page}-${section.end_page}</span>
+                    `;
+                    item.onclick = () => showPage(section.start_page);
+                    group.appendChild(item);
+                });
+
+                list.appendChild(group);
+            });
+        }
+
+        function getSectionsForPage(pageNum) {
+            // Find all sections that include this page
+            return documentData.sections.filter(s =>
+                pageNum >= s.start_page && pageNum <= s.end_page
+            );
+        }
+
+        function updateSectionBreadcrumb(pageNum) {
+            const breadcrumb = document.getElementById('section-breadcrumb');
+            const sections = getSectionsForPage(pageNum);
+
+            if (sections.length === 0) {
+                breadcrumb.innerHTML = '<span class="section-name" style="color:#666">No section</span>';
+                return;
+            }
+
+            // Find the most specific section (subsection > section > title)
+            const levelOrder = ['subsection', 'section', 'title', 'label'];
+            sections.sort((a, b) => levelOrder.indexOf(a.level) - levelOrder.indexOf(b.level));
+
+            const current = sections[0];
+            const parent = current.parent_id ?
+                documentData.sections.find(s => s.id === current.parent_id) : null;
+
+            let html = `<span class="matter-badge ${current.matter}">${current.matter}</span>`;
+
+            if (parent) {
+                html += `<span class="section-name">${parent.name}</span>`;
+                html += `<span class="separator">›</span>`;
+                html += `<span class="subsection-name">${current.name}</span>`;
+            } else {
+                html += `<span class="section-name">${current.name}</span>`;
+            }
+
+            breadcrumb.innerHTML = html;
+
+            // Update section list highlighting - highlight ALL sections on this page
+            document.querySelectorAll('.section-item').forEach(item => {
+                item.classList.remove('active', 'on-page');
+                const startPage = parseInt(item.dataset.startPage);
+                const endPage = parseInt(item.dataset.endPage);
+                if (pageNum >= startPage && pageNum <= endPage) {
+                    item.classList.add('on-page');
+                }
+            });
+
+            // Mark the most specific section as active
+            const currentId = current.id;
+            const activeItem = document.querySelector(`.section-item[data-section-id="${currentId}"]`);
+            if (activeItem) activeItem.classList.add('active');
+        }
+
+        function showPage(pageNum) {
+            currentPage = pageNum;
+            const page = documentData.pages.find(p => p.sequence_number === pageNum);
+            if (!page) return;
+
+            // Unpin when changing pages
+            if (pinnedElement) {
+                pinnedElement = null;
+                pinnedOverlay = null;
+                document.getElementById('unpin-btn').classList.remove('visible');
+            }
+
+            // Update page list
+            document.querySelectorAll('.page-btn').forEach((btn, i) => {
+                btn.classList.toggle('active', i + 1 === pageNum);
+            });
+
+            // Update section breadcrumb
+            updateSectionBreadcrumb(pageNum);
+
+            // Load image
+            const img = document.getElementById('page-image');
+            const paddedNum = String(pageNum).padStart(3, '0');
+            img.src = `page_images/page_${paddedNum}.png`;
+
+            img.onload = () => {
+                imageNaturalWidth = img.naturalWidth;
+                imageNaturalHeight = img.naturalHeight;
+                renderOverlays(page);
+            };
+
+            clearInfoPanel();
+        }
+
+        function renderOverlays(page) {
+            const wrapper = document.getElementById('page-wrapper');
+            const img = document.getElementById('page-image');
+
+            wrapper.querySelectorAll('.overlay, .section-marker').forEach(o => o.remove());
+
+            const displayWidth = img.offsetWidth;
+            const displayHeight = img.offsetHeight;
+            const scaleX = displayWidth / imageNaturalWidth;
+            const scaleY = displayHeight / imageNaturalHeight;
+
+            page.elements.forEach(elem => {
+                if ((!elem.parsed_content && !elem.figure_type) || !elem.bounding_boxes || elem.bounding_boxes.length === 0) return;
+
+                const box = elem.bounding_boxes[0];
+                const overlay = document.createElement('div');
+                overlay.className = `overlay ${elem.raw_type}`;
+
+                overlay.style.left = (box.x1 * scaleX) + 'px';
+                overlay.style.top = (box.y1 * scaleY) + 'px';
+                overlay.style.width = ((box.x2 - box.x1) * scaleX) + 'px';
+                overlay.style.height = ((box.y2 - box.y1) * scaleY) + 'px';
+
+                const label = document.createElement('span');
+                label.className = 'label';
+                if (elem.figure_type) {
+                    label.textContent = elem.figure_type.replace(/_/g, ' ');
+                } else {
+                    label.textContent = elem.raw_type === 'table' ? 'Table' : 'Figure';
+                }
+                overlay.appendChild(label);
+
+                // Hover shows preview, click pins
+                overlay.onmouseenter = () => {
+                    if (!pinnedElement) showParsedContent(elem, false);
+                };
+                overlay.onmouseleave = () => {
+                    if (!pinnedElement) clearInfoPanel();
+                };
+                overlay.onclick = (e) => {
+                    e.stopPropagation();
+                    pinElement(elem, overlay);
+                };
+
+                wrapper.appendChild(overlay);
+            });
+
+            // Render section markers for sections starting on this page
+            renderSectionMarkers(page, scaleX, scaleY);
+        }
+
+        function getSectionsStartingOnPage(pageNum) {
+            return documentData.sections.filter(s => s.start_page === pageNum);
+        }
+
+        function findHeadingForSection(page, sectionName) {
+            // Find heading element that matches section name
+            // Look for title/sub_title elements with matching text
+            for (const elem of page.elements) {
+                const type = elem.element_type || elem.raw_type;
+                if ((type === 'title' || type === 'sub_title') && elem.bounding_boxes && elem.bounding_boxes.length > 0) {
+                    // Check if element text matches section name (could be in content or check by position)
+                    // Since we don't have text content in elements, we match by checking
+                    // if any title/subtitle is near the expected position
+                    return elem;
+                }
+            }
+            return null;
+        }
+
+        function renderSectionMarkers(page, scaleX, scaleY) {
+            const wrapper = document.getElementById('page-wrapper');
+            const pageNum = page.sequence_number;
+            const sectionsStarting = getSectionsStartingOnPage(pageNum);
+
+            if (sectionsStarting.length === 0) return;
+
+            // Find all title/subtitle elements on this page
+            const headings = page.elements.filter(elem => {
+                const type = elem.element_type || elem.raw_type;
+                return (type === 'title' || type === 'sub_title') && elem.bounding_boxes && elem.bounding_boxes.length > 0;
+            });
+
+            // Sort headings by Y position
+            headings.sort((a, b) => a.bounding_boxes[0].y1 - b.bounding_boxes[0].y1);
+
+            // Match sections to headings by order (both should be in document order)
+            sectionsStarting.forEach((section, idx) => {
+                const heading = headings[idx];
+                if (!heading) return;
+
+                const box = heading.bounding_boxes[0];
+                const marker = document.createElement('div');
+                marker.className = `section-marker ${section.matter}`;
+                marker.style.top = (box.y1 * scaleY) + 'px';
+
+                const label = document.createElement('span');
+                label.className = 'marker-label';
+                label.textContent = section.name;
+                label.title = section.name;
+                marker.appendChild(label);
+
+                wrapper.appendChild(marker);
+            });
+        }
+
+        function formatChartData(chartData) {
+            // Handle array of charts (composite) or single chart
+            const charts = Array.isArray(chartData) ? chartData : [chartData];
+            let html = '';
+
+            charts.forEach((chart, chartIdx) => {
+                if (charts.length > 1) {
+                    html += `<div class="section-label">Chart ${chartIdx + 1}</div>`;
+                }
+
+                html += '<div class="chart-data">';
+
+                // Chart metadata
+                html += '<div class="chart-meta">';
+                if (chart.chart_title) {
+                    html += `<span class="chart-meta-label">Title:</span><span class="chart-meta-value">${chart.chart_title}</span>`;
+                }
+                if (chart.Chart_Type) {
+                    html += `<span class="chart-meta-label">Type:</span><span class="chart-meta-value">${chart.Chart_Type}</span>`;
+                }
+                if (chart.x_axis_label) {
+                    html += `<span class="chart-meta-label">X-Axis:</span><span class="chart-meta-value">${chart.x_axis_label}</span>`;
+                }
+                if (chart.y_axis_label) {
+                    html += `<span class="chart-meta-label">Y-Axis:</span><span class="chart-meta-value">${chart.y_axis_label}</span>`;
+                }
+                if (chart.x_axis_min != null || chart.x_axis_max != null) {
+                    html += `<span class="chart-meta-label">X Range:</span><span class="chart-meta-value">${chart.x_axis_min ?? '?'} - ${chart.x_axis_max ?? '?'}</span>`;
+                }
+                if (chart.Left_Y_axis_min != null || chart.Left_Y_axis_max != null) {
+                    html += `<span class="chart-meta-label">Y Range:</span><span class="chart-meta-value">${chart.Left_Y_axis_min ?? '?'} - ${chart.Left_Y_axis_max ?? '?'}</span>`;
+                }
+                html += '</div>';
+
+                // Data points grouped by series - handle both flat and nested formats
+                const data = chart.data || [];
+                if (data.length > 0) {
+                    const seriesMap = new Map();
+                    data.forEach(item => {
+                        // Check for nested format: points or data_points array
+                        const nestedPoints = item.points || item.data_points;
+                        if (nestedPoints && Array.isArray(nestedPoints)) {
+                            // Nested format
+                            const series = item.series || 'Default';
+                            if (!seriesMap.has(series)) {
+                                seriesMap.set(series, { points: [], color: item.color });
+                            }
+                            nestedPoints.forEach(pt => {
+                                seriesMap.get(series).points.push(pt);
+                            });
+                        } else {
+                            // Flat format
+                            const series = item.series || 'Default';
+                            if (!seriesMap.has(series)) {
+                                seriesMap.set(series, { points: [], color: item.color });
+                            }
+                            seriesMap.get(series).points.push(item);
+                        }
+                    });
+
+                    seriesMap.forEach((seriesData, seriesName) => {
+                        // Check if points have varying colors
+                        const colors = seriesData.points.map(p => p.color).filter(c => c);
+                        const hasVaryingColors = new Set(colors).size > 1;
+
+                        html += '<div class="chart-series">';
+                        html += '<div class="chart-series-header">';
+                        if (!hasVaryingColors && seriesData.color) {
+                            html += `<div class="chart-series-color" style="background: ${seriesData.color}"></div>`;
+                        }
+                        html += `<span class="chart-series-name">${seriesName}</span>`;
+                        html += `<span class="chart-series-count">(${seriesData.points.length} points)</span>`;
+                        html += '</div>';
+
+                        // Show data points - first few visible, rest hidden initially
+                        const maxShow = 5;
+                        const showColorCol = hasVaryingColors;
+                        html += `<table class="chart-data-table"><thead><tr>${showColorCol ? '<th></th>' : ''}<th>X</th><th>Y</th></tr></thead><tbody>`;
+                        seriesData.points.forEach((p, idx) => {
+                            const xVal = typeof p.x === 'number' ? p.x.toFixed(2) : p.x;
+                            const yVal = typeof p.y === 'number' ? p.y.toFixed(2) : p.y;
+                            const colorCell = showColorCol ? `<td><div class="chart-series-color" style="background: ${p.color || '#999'}; margin: 0;"></div></td>` : '';
+                            const hiddenStyle = idx >= maxShow ? ' class="hidden-row" style="display: none;"' : '';
+                            html += `<tr${hiddenStyle}>${colorCell}<td>${xVal}</td><td>${yVal}</td></tr>`;
+                        });
+                        html += '</tbody></table>';
+
+                        if (seriesData.points.length > maxShow) {
+                            html += `<button class="chart-toggle" onclick="const rows = this.parentElement.querySelectorAll('.hidden-row'); const showing = rows[0]?.style.display !== 'none'; rows.forEach(r => r.style.display = showing ? 'none' : ''); this.textContent = showing ? '... ${seriesData.points.length - maxShow} more points' : 'Show less';">... ${seriesData.points.length - maxShow} more points</button>`;
+                        }
+                        html += '</div>';
+                    });
+                }
+
+                html += '</div>';
+            });
+
+            return html;
+        }
+
+        function pinElement(elem, overlay) {
+            // Unpin previous
+            if (pinnedOverlay) {
+                pinnedOverlay.classList.remove('pinned');
+            }
+
+            // Pin new element
+            pinnedElement = elem;
+            pinnedOverlay = overlay;
+            overlay.classList.add('pinned');
+
+            // Show unpin button
+            document.getElementById('unpin-btn').classList.add('visible');
+
+            // Show content with tabs
+            showParsedContent(elem, true);
+        }
+
+        function unpinElement() {
+            if (pinnedOverlay) {
+                pinnedOverlay.classList.remove('pinned');
+            }
+            pinnedElement = null;
+            pinnedOverlay = null;
+
+            // Hide unpin button
+            document.getElementById('unpin-btn').classList.remove('visible');
+
+            // Clear info panel
+            clearInfoPanel();
+        }
+
+        function showInfoTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.info-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.dataset.tab === tabName) {
+                    tab.classList.add('active');
+                }
+            });
+
+            // Update tab content
+            document.querySelectorAll('.info-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        function showParsedContent(elem, isPinned = false) {
+            const title = document.getElementById('info-title');
+            const tabs = document.getElementById('info-tabs');
+            const emptyMsg = document.querySelector('.empty-message');
+
+            title.textContent = `Element ${elem.id} (${elem.raw_type})`;
+
+            // Hide empty message, show tabs
+            if (emptyMsg) emptyMsg.style.display = 'none';
+            tabs.style.display = 'flex';
+
+            // Build description tab content
+            let descHtml = '';
+
+            // Get captions for use in visual tab (not shown in description tab)
+            const captions = captionMap.get(elem._globalIndex) || [];
+
+            if (elem.figure_type || elem.figure_description) {
+                descHtml += '<div class="figure-meta">';
+                if (elem.figure_type) {
+                    const typeLabel = elem.figure_type.replace(/_/g, ' ');
+                    descHtml += `<span class="figure-type">${typeLabel}</span>`;
+                }
+                if (elem.figure_description) {
+                    descHtml += `<div class="figure-description">${elem.figure_description}</div>`;
+                }
+                descHtml += '</div>';
+            } else if (elem.raw_type === 'table') {
+                // Use caption as description if available
+                const tableCaption = captions.find(c => c.type === 'table_caption');
+                const captionText = tableCaption ? tableCaption.content.replace(/\\\\?\*/g, '*').replace(/\\\\/g, '\\') : 'Data table extracted from document';
+                descHtml += `<div class="figure-meta"><span class="figure-type" style="background: #3498db;">Table</span><div class="figure-description">${captionText}</div></div>`;
+            } else if (elem.raw_type === 'image') {
+                // Use caption as description if available
+                const imageCaption = captions.find(c => c.type === 'image_caption');
+                const captionText = imageCaption ? imageCaption.content.replace(/\\\\?\*/g, '*').replace(/\\\\/g, '\\') : 'Figure from document (not classified)';
+                descHtml += `<div class="figure-meta"><span class="figure-type" style="background: #2ecc71;">Figure</span><div class="figure-description">${captionText}</div></div>`;
+            } else {
+                descHtml = '<div class="description" style="color: #666;">No description available</div>';
+            }
+            document.getElementById('tab-description').innerHTML = descHtml;
+
+            // Trigger MathJax to render any LaTeX in description/captions
+            if (typeof MathJax !== 'undefined' && MathJax.typeset) {
+                MathJax.typeset([document.getElementById('tab-description')]);
+            }
+
+            // Build chart data tab content - only show for charts
+            const chartTab = document.querySelector('.info-tab[data-tab="chart"]');
+            if (elem.chart_data) {
+                chartTab.style.display = '';
+                chartTab.classList.remove('disabled');
+                document.getElementById('tab-chart').innerHTML = formatChartData(elem.chart_data);
+            } else {
+                chartTab.style.display = 'none';
+                document.getElementById('tab-chart').innerHTML = '';
+            }
+
+            // Build visual/replotted tab content
+            const visualTab = document.querySelector('.info-tab[data-tab="visual"]');
+            if (elem.chart_data) {
+                visualTab.classList.remove('disabled');
+                visualTab.textContent = 'Replotted';
+                // Render chart when tab is shown
+                renderReplotChart(elem.chart_data, captionMap.get(elem._globalIndex) || [], elem.id);
+            } else if (elem.parsed_content) {
+                // For non-chart elements with parsed content, show as OCR
+                visualTab.classList.remove('disabled');
+                visualTab.textContent = 'OCR Data';
+                const tabVisual = document.getElementById('tab-visual');
+                const elemCaptions = captionMap.get(elem._globalIndex) || [];
+
+                let contentHtml = '<div style="background: white; border-radius: 6px; padding: 10px; color: #333;">';
+                if (elem.parsed_content.trim().startsWith('<table>')) {
+                    contentHtml += parseHtmlTable(elem.parsed_content);
+                } else {
+                    contentHtml += `<div class="description">${elem.parsed_content}</div>`;
+                }
+
+                // Add captions after the content
+                if (elemCaptions.length > 0) {
+                    contentHtml += '<div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #3498db;">';
+                    elemCaptions.forEach(cap => {
+                        const typeLabel = cap.type === 'table_footnote' ? 'Note' : 'Caption';
+                        // Clean up escaped characters that aren't LaTeX
+                        let cleanContent = (cap.content || '')
+                            .replace(/\\\\?\*/g, '*')  // \* or \\* -> *
+                            .replace(/\\\\/g, '\\');   // \\\\ -> \\
+                        contentHtml += `<div style="font-size: 13px; line-height: 1.5;"><strong>${typeLabel}:</strong> ${cleanContent}</div>`;
+                    });
+                    contentHtml += '</div>';
+                }
+                contentHtml += '</div>';
+                tabVisual.innerHTML = contentHtml;
+
+                // Trigger MathJax to render any LaTeX in table content and captions
+                if (typeof MathJax !== 'undefined' && MathJax.typeset) {
+                    MathJax.typeset([tabVisual]);
+                }
+            } else {
+                visualTab.classList.add('disabled');
+                visualTab.textContent = 'Visual';
+                document.getElementById('tab-visual').innerHTML = '<div style="width: 100%; height: 400px;"><canvas id="replot-canvas"></canvas></div>';
+            }
+
+            // Select appropriate tab
+            if (isPinned && elem.chart_data) {
+                // For pinned charts, show replotted chart
+                showInfoTab('visual');
+            } else if (elem.raw_type === 'table' && elem.parsed_content) {
+                // For tables, show OCR data (the parsed HTML table)
+                showInfoTab('visual');
+            } else if (elem.figure_type || elem.figure_description) {
+                // Show description if available
+                showInfoTab('description');
+            } else if (elem.parsed_content) {
+                // Otherwise show visual/OCR data
+                showInfoTab('visual');
+            } else {
+                showInfoTab('description');
+            }
+        }
+
+        function renderReplotChart(chartData, captions = [], elementId = 'unknown') {
+            // Destroy previous charts if exist
+            replotCharts.forEach(c => c.destroy());
+            replotCharts = [];
+
+            const tabVisual = document.getElementById('tab-visual');
+
+            // Handle single chart or array of charts
+            const charts = Array.isArray(chartData) ? chartData : [chartData];
+            const validCharts = charts.filter(c => c && c.data && c.data.length > 0);
+
+            if (validCharts.length === 0) {
+                tabVisual.innerHTML = '<div class="description" style="color: #666;">No data to plot</div>';
+                return;
+            }
+
+            // Create container with multiple chart canvases
+            const chartHeight = validCharts.length > 1 ? 300 : 400;
+            let html = '<div class="replot-container" style="background: white; border-radius: 6px; padding: 10px;">';
+
+            validCharts.forEach((chart, idx) => {
+                const title = chart.chart_title || `Chart ${idx + 1}`;
+                html += `<div class="replot-chart-wrapper" style="margin-bottom: ${idx < validCharts.length - 1 ? '20px' : '0'};">`;
+                if (validCharts.length > 1) {
+                    html += `<div style="font-weight: 600; color: #333; margin-bottom: 8px; font-size: 14px;">Chart ${title}</div>`;
+                }
+                html += `<div style="width: 100%; height: ${chartHeight}px;"><canvas id="replot-canvas-${idx}"></canvas></div>`;
+                html += '</div>';
+            });
+
+            // Add caption after the charts
+            if (captions.length > 0) {
+                html += '<div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #3498db;">';
+                captions.forEach(cap => {
+                    const typeLabel = cap.type === 'table_footnote' ? 'Note' : 'Caption';
+                    // Clean up escaped characters that aren't LaTeX
+                    let cleanContent = (cap.content || '')
+                        .replace(/\\\\?\*/g, '*')  // \* or \\* -> *
+                        .replace(/\\\\/g, '\\');   // \\\\ -> \\
+                    html += `<div style="color: #333; font-size: 13px; line-height: 1.5;"><strong>${typeLabel}:</strong> ${cleanContent}</div>`;
+                });
+                html += '</div>';
+            }
+
+            // Add download JSON button and link to Chart Data tab
+            html += '<div style="margin-top: 15px; text-align: right; display: flex; justify-content: flex-end; gap: 10px;">';
+            html += '<button id="view-chart-data" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">View Chart Data</button>';
+            html += '<button id="download-chart-json" style="padding: 6px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Download JSON</button>';
+            html += '</div>';
+
+            html += '</div>';
+            tabVisual.innerHTML = html;
+
+            // Setup buttons
+            document.getElementById('view-chart-data').addEventListener('click', () => {
+                showInfoTab('chart');
+            });
+
+            document.getElementById('download-chart-json').addEventListener('click', () => {
+                const jsonStr = JSON.stringify(chartData, null, 2);
+                const blob = new Blob([jsonStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chart_data_element_${elementId}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+
+            // Trigger MathJax to render any LaTeX in captions
+            if (captions.length > 0 && typeof MathJax !== 'undefined' && MathJax.typeset) {
+                MathJax.typeset([tabVisual]);
+            }
+
+            // Map marker types to Chart.js point styles
+            const markerStyleMap = {
+                'circle': 'circle',
+                'square': 'rect',
+                'triangle': 'triangle',
+                'diamond': 'rectRot',
+                'star': 'star',
+                'plus': 'cross',
+                'x': 'crossRot',
+            };
+            const defaultColors = ['#e94560', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22'];
+
+            // Render each chart
+            validCharts.forEach((chart, idx) => {
+                const canvas = document.getElementById(`replot-canvas-${idx}`);
+                const ctx = canvas.getContext('2d');
+
+                const chartType = (chart.Chart_Type || '').toLowerCase();
+                const data = chart.data || [];
+
+                // Group data by series - handle both flat and nested formats
+                const seriesMap = new Map();
+                data.forEach(item => {
+                    // Check for nested format: points or data_points array
+                    const nestedPoints = item.points || item.data_points;
+                    if (nestedPoints && Array.isArray(nestedPoints)) {
+                        // Nested format: {series, color, points/data_points: [{x, y}, ...]}
+                        const series = item.series || 'Default';
+                        if (!seriesMap.has(series)) {
+                            seriesMap.set(series, { points: [], errorBars: [], color: item.color, lineStyle: item.line_style, markerType: item.marker_type, markerFill: item.marker_fill, markerSize: item.marker_size });
+                        }
+                        nestedPoints.forEach(pt => {
+                            seriesMap.get(series).points.push({ x: pt.x, y: pt.y });
+                            seriesMap.get(series).errorBars.push(pt.error_bars ? {
+                                plus: pt.error_bars.error_plus || 0,
+                                minus: pt.error_bars.error_minus || 0
+                            } : null);
+                        });
+                    } else {
+                        // Flat format: {series, x, y, color, ...}
+                        const series = item.series || 'Default';
+                        if (!seriesMap.has(series)) {
+                            seriesMap.set(series, {
+                                points: [],
+                                errorBars: [],
+                                color: item.color,
+                                lineStyle: item.line_style,
+                                markerType: item.marker_type,
+                                markerFill: item.marker_fill,
+                                markerSize: item.marker_size,
+                                // Per-point arrays for mixed styles within same series
+                                perPointColors: [],
+                                perPointMarkerTypes: [],
+                                perPointMarkerFills: [],
+                                perPointMarkerSizes: []
+                            });
+                        }
+                        const seriesEntry = seriesMap.get(series);
+                        seriesEntry.points.push({ x: item.x, y: item.y });
+                        // Track per-point styles
+                        seriesEntry.perPointColors.push(item.color);
+                        seriesEntry.perPointMarkerTypes.push(item.marker_type);
+                        seriesEntry.perPointMarkerFills.push(item.marker_fill);
+                        seriesEntry.perPointMarkerSizes.push(item.marker_size);
+                        // Extract error bars if present (can be object or array for bidirectional)
+                        const errBars = item.error_bars;
+                        let vertErr = null, horizErr = null;
+                        if (errBars) {
+                            const errArray = Array.isArray(errBars) ? errBars : [errBars];
+                            errArray.forEach(eb => {
+                                if (eb.error_direction === 'vertical') {
+                                    vertErr = { plus: eb.error_plus || 0, minus: eb.error_minus || 0 };
+                                } else if (eb.error_direction === 'horizontal') {
+                                    horizErr = { plus: eb.error_plus || 0, minus: eb.error_minus || 0 };
+                                } else if (!eb.error_direction) {
+                                    // Default to vertical if not specified
+                                    vertErr = { plus: eb.error_plus || 0, minus: eb.error_minus || 0 };
+                                }
+                            });
+                        }
+                        seriesMap.get(series).errorBars.push(vertErr);
+                        if (!seriesMap.get(series).errorBarsHoriz) {
+                            seriesMap.get(series).errorBarsHoriz = [];
+                        }
+                        seriesMap.get(series).errorBarsHoriz.push(horizErr);
+                    }
+                });
+
+                // Prepare datasets
+                const datasets = [];
+                let colorIdx = 0;
+
+                // Helper function to map marker size to pixel radius
+                function getPointRadius(markerSize) {
+                    let pointRadius = 4; // default
+                    if (markerSize) {
+                        if (typeof markerSize === 'number') {
+                            pointRadius = markerSize;
+                        } else {
+                            const sizeStr = String(markerSize).toLowerCase();
+                            if (sizeStr === 'small') pointRadius = 3;
+                            else if (sizeStr === 'medium') pointRadius = 5;
+                            else if (sizeStr === 'large') pointRadius = 7;
+                            else {
+                                const parsed = parseFloat(sizeStr);
+                                if (!isNaN(parsed)) pointRadius = parsed;
+                            }
+                        }
+                    }
+                    return pointRadius;
+                }
+
+                seriesMap.forEach((seriesData, seriesName) => {
+                    const color = seriesData.color || defaultColors[colorIdx % defaultColors.length];
+                    colorIdx++;
+
+                    const lineStyle = (seriesData.lineStyle || '').toLowerCase();
+                    const markerType = (seriesData.markerType || '').toLowerCase();
+                    const markerFill = (seriesData.markerFill || 'filled').toLowerCase();
+                    const markerSize = seriesData.markerSize;
+                    const hasLine = !lineStyle ? true : (lineStyle !== 'none');
+                    const hasMarker = !markerType ? true : (markerType !== 'none');
+                    // For legend: use 'line' style for line-only series, otherwise use marker shape
+                    const pointStyle = hasMarker ? (markerStyleMap[markerType] || 'circle') : 'line';
+                    const isHollow = markerFill === 'hollow' || markerFill === 'open';
+
+                    // Check if we have per-point style variations
+                    const perPointColors = seriesData.perPointColors || [];
+                    const perPointMarkerTypes = seriesData.perPointMarkerTypes || [];
+                    const perPointMarkerFills = seriesData.perPointMarkerFills || [];
+                    const perPointMarkerSizes = seriesData.perPointMarkerSizes || [];
+
+                    // Check if styles vary across points
+                    const hasVaryingColors = perPointColors.length > 1 && new Set(perPointColors.filter(c => c)).size > 1;
+                    const hasVaryingMarkers = perPointMarkerTypes.length > 1 && new Set(perPointMarkerTypes.filter(m => m)).size > 1;
+                    const hasVaryingFills = perPointMarkerFills.length > 1 && new Set(perPointMarkerFills.filter(f => f)).size > 1;
+                    const hasVaryingStyles = hasVaryingColors || hasVaryingMarkers || hasVaryingFills;
+
+                    // Map marker size to pixel radius
+                    let pointRadius = getPointRadius(markerSize);
+
+                    if (chartType.includes('bar') || chartType.includes('histogram')) {
+                        // Check if any error bars exist
+                        const hasErrorBars = seriesData.errorBars.some(eb => eb !== null);
+                        const hasErrorBarsHoriz = seriesData.errorBarsHoriz?.some(eb => eb !== null);
+                        datasets.push({
+                            label: seriesName,
+                            data: seriesData.points,
+                            backgroundColor: color + '99',
+                            borderColor: color,
+                            borderWidth: 1,
+                            // Add error bars data for the plugin
+                            errorBars: hasErrorBars ? seriesData.errorBars : undefined,
+                            errorBarsHoriz: hasErrorBarsHoriz ? seriesData.errorBarsHoriz : undefined,
+                            errorBarColor: '#000',
+                            errorBarLineWidth: 1.5,
+                        });
+                    } else {
+                        let borderDash = [];
+                        if (lineStyle === 'dashed') borderDash = [5, 5];
+                        else if (lineStyle === 'dotted') borderDash = [2, 2];
+                        else if (lineStyle === 'dashdot') borderDash = [5, 2, 2, 2];
+
+                        // Check if any error bars exist for scatter/line plots too
+                        const hasErrorBars = seriesData.errorBars.some(eb => eb !== null);
+                        const hasErrorBarsHoriz = seriesData.errorBarsHoriz?.some(eb => eb !== null);
+
+                        // Build per-point style arrays if styles vary
+                        let pointStyleArr, pointBgColorArr, pointBorderColorArr, pointBorderWidthArr, pointRadiusArr;
+
+                        if (hasVaryingStyles) {
+                            pointStyleArr = perPointMarkerTypes.map(mt => {
+                                const mtLower = (mt || '').toLowerCase();
+                                return mtLower && mtLower !== 'none' ? (markerStyleMap[mtLower] || 'circle') : 'circle';
+                            });
+                            pointBgColorArr = perPointColors.map((c, i) => {
+                                const fillType = (perPointMarkerFills[i] || 'filled').toLowerCase();
+                                const isPointHollow = fillType === 'hollow' || fillType === 'open';
+                                return isPointHollow ? 'transparent' : (c || color);
+                            });
+                            pointBorderColorArr = perPointColors.map(c => c || color);
+                            pointBorderWidthArr = perPointMarkerFills.map(f => {
+                                const fillType = (f || 'filled').toLowerCase();
+                                return (fillType === 'hollow' || fillType === 'open') ? 2 : 1;
+                            });
+                            pointRadiusArr = perPointMarkerSizes.map(s => getPointRadius(s));
+                        }
+
+                        datasets.push({
+                            label: seriesName,
+                            data: seriesData.points,
+                            borderColor: hasLine ? color : 'transparent',
+                            // For hollow markers: transparent fill (inherits chart background), colored border
+                            backgroundColor: isHollow ? 'transparent' : (color + '33'),
+                            pointBackgroundColor: hasVaryingStyles ? pointBgColorArr : (isHollow ? 'transparent' : color),
+                            pointBorderColor: hasVaryingStyles ? pointBorderColorArr : color,
+                            pointBorderWidth: hasVaryingStyles ? pointBorderWidthArr : (isHollow ? 2 : 1),
+                            pointStyle: hasVaryingStyles ? pointStyleArr : pointStyle,
+                            pointRadius: hasVaryingStyles ? pointRadiusArr : (hasMarker ? pointRadius : 0),
+                            pointHoverRadius: hasMarker ? pointRadius + 2 : 0,
+                            borderDash: borderDash,
+                            borderWidth: hasLine ? 2 : 0,
+                            fill: false,
+                            tension: 0,
+                            showLine: hasLine,
+                            // Add error bars for scatter/line plots
+                            errorBars: hasErrorBars ? seriesData.errorBars : undefined,
+                            errorBarsHoriz: hasErrorBarsHoriz ? seriesData.errorBarsHoriz : undefined,
+                            errorBarColor: '#000',
+                            errorBarLineWidth: 1.5,
+                        });
+                    }
+                });
+
+                // Determine chart type for Chart.js
+                let chartJsType = 'line';
+                const isBarChart = chartType.includes('bar') || chartType.includes('column') || chartType.includes('histogram');
+                if (isBarChart) {
+                    chartJsType = 'bar';
+                } else if (chartType.includes('scatter')) {
+                    chartJsType = 'scatter';
+                } else if (chartType.includes('pie')) {
+                    chartJsType = 'pie';
+                }
+
+                const xMin = chart.x_axis_min;
+                const xMax = chart.x_axis_max;
+                const yMin = chart.Left_Y_axis_min;
+                const yMax = chart.Left_Y_axis_max;
+
+                // For bar charts, transform data to use categorical labels
+                let chartData = { datasets };
+                let xAxisConfig = {
+                    type: 'linear',
+                    min: xMin != null ? xMin : undefined,
+                    max: xMax != null ? xMax : undefined,
+                    title: {
+                        display: !!chart.x_axis_label,
+                        text: chart.x_axis_label || '',
+                        color: '#333',
+                    },
+                    ticks: { color: '#555' },
+                    grid: { color: '#ddd' },
+                };
+
+                if (isBarChart) {
+                    // Get unique x values as categories
+                    const categories = [...new Set(data.map(item => item.x))].sort((a, b) => a - b);
+                    const categoryLabels = categories.map(c => String(c));
+
+                    // Transform datasets for categorical bar chart
+                    const barDatasets = [];
+                    seriesMap.forEach((seriesData, seriesName) => {
+                        const color = seriesData.color || defaultColors[barDatasets.length % defaultColors.length];
+                        // Map points to category indices
+                        const values = categories.map(cat => {
+                            const point = seriesData.points.find(p => p.x === cat);
+                            return point ? point.y : null;
+                        });
+                        // Map error bars to category indices - use object for reliable lookup
+                        const errBarsMap = {};
+                        categories.forEach((cat, catIdx) => {
+                            const idx = seriesData.points.findIndex(p => p.x === cat);
+                            if (idx >= 0 && seriesData.errorBars && seriesData.errorBars[idx]) {
+                                errBarsMap[catIdx] = seriesData.errorBars[idx];
+                            }
+                        });
+                        const hasErrBars = Object.keys(errBarsMap).length > 0;
+
+                        barDatasets.push({
+                            label: seriesName,
+                            data: values,
+                            backgroundColor: color + '99',
+                            borderColor: color,
+                            borderWidth: 1,
+                            errorBarsMap: hasErrBars ? errBarsMap : undefined,
+                            errorBarColor: '#000',
+                            errorBarLineWidth: 1.5,
+                        });
+                    });
+
+                    chartData = { labels: categoryLabels, datasets: barDatasets };
+                    xAxisConfig = {
+                        type: 'category',
+                        title: {
+                            display: !!chart.x_axis_label,
+                            text: chart.x_axis_label || '',
+                            color: '#333',
+                        },
+                        ticks: { color: '#555' },
+                        grid: { color: '#ddd' },
+                    };
+                }
+
+                const chartInstance = new Chart(ctx, {
+                    type: chartJsType,
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: validCharts.length === 1 && !!chart.chart_title,
+                                text: chart.chart_title || '',
+                                color: '#333',
+                            },
+                            legend: {
+                                labels: {
+                                    color: '#333',
+                                    usePointStyle: true,
+                                    boxWidth: 8,
+                                    boxHeight: 8,
+                                    // Custom generator to properly show line styles
+                                    generateLabels: function(chart) {
+                                        const datasets = chart.data.datasets;
+                                        return datasets.map((dataset, i) => {
+                                            const meta = chart.getDatasetMeta(i);
+                                            // For hollow markers (transparent fill), use white fill with border
+                                            const isHollow = dataset.pointBackgroundColor === 'transparent';
+                                            const fillColor = isHollow ? '#ffffff' : (dataset.pointBackgroundColor || dataset.borderColor);
+                                            return {
+                                                text: dataset.label,
+                                                fillStyle: fillColor,
+                                                strokeStyle: dataset.pointBorderColor || dataset.borderColor,
+                                                lineWidth: isHollow ? 2 : (dataset.borderWidth || 1),
+                                                lineDash: dataset.borderDash || [],
+                                                pointStyle: dataset.pointStyle,
+                                                hidden: meta.hidden,
+                                                datasetIndex: i
+                                            };
+                                        });
+                                    }
+                                }
+                            }
+                        },
+                        scales: chartJsType !== 'pie' ? {
+                            x: xAxisConfig,
+                            y: {
+                                min: yMin != null ? yMin : undefined,
+                                max: yMax != null ? yMax : undefined,
+                                title: {
+                                    display: !!chart.y_axis_label,
+                                    text: chart.y_axis_label || '',
+                                    color: '#333',
+                                },
+                                ticks: { color: '#555' },
+                                grid: { color: '#ddd' },
+                            }
+                        } : undefined,
+                    }
+                });
+                replotCharts.push(chartInstance);
+            });
+        }
+
+        function parseHtmlTable(html) {
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            const table = temp.querySelector('table');
+            if (!table) return `<div class="description">${html}</div>`;
+
+            table.className = 'parsed-table';
+
+            const rows = table.querySelectorAll('tr');
+            if (rows.length > 0) {
+                const firstRow = rows[0];
+                const cells = firstRow.querySelectorAll('td');
+                cells.forEach(cell => {
+                    const th = document.createElement('th');
+                    th.innerHTML = cell.innerHTML;
+                    cell.parentNode.replaceChild(th, cell);
+                });
+            }
+
+            return table.outerHTML;
+        }
+
+        function clearInfoPanel() {
+            const title = document.getElementById('info-title');
+            const tabs = document.getElementById('info-tabs');
+            const emptyMsg = document.querySelector('.empty-message');
+
+            title.textContent = 'Element Details';
+
+            // Destroy chart if exists
+            if (replotCharts.length > 0) {
+                replotCharts.forEach(c => c.destroy());
+                replotCharts = [];
+            }
+
+            // Hide tabs, show empty message
+            tabs.style.display = 'none';
+            if (emptyMsg) emptyMsg.style.display = 'flex';
+
+            // Clear tab contents
+            document.getElementById('tab-description').innerHTML = '';
+            document.getElementById('tab-chart').innerHTML = '';
+            document.getElementById('tab-visual').innerHTML = '<div style="width: 100%; height: 400px;"><canvas id="replot-canvas"></canvas></div>';
+
+            // Reset visual tab name
+            document.querySelector('.info-tab[data-tab="visual"]').textContent = 'Visual';
+
+            // Reset tab state
+            document.querySelectorAll('.info-tab').forEach(tab => {
+                tab.classList.remove('active', 'disabled');
+            });
+            document.querySelector('.info-tab[data-tab="description"]').classList.add('active');
+            document.querySelectorAll('.info-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById('tab-description').classList.add('active');
+        }
+
+        function zoomIn() {
+            zoom = Math.min(zoom + 0.25, 3);
+            applyZoom();
+        }
+
+        function zoomOut() {
+            zoom = Math.max(zoom - 0.25, 0.5);
+            applyZoom();
+        }
+
+        function applyZoom() {
+            const img = document.getElementById('page-image');
+            img.style.width = (imageNaturalWidth * zoom) + 'px';
+            document.getElementById('zoom-level').textContent = Math.round(zoom * 100) + '%';
+
+            const page = documentData.pages.find(p => p.sequence_number === currentPage);
+            if (page) {
+                setTimeout(() => renderOverlays(page), 50);
+            }
+        }
+
+        function prevPage() {
+            if (currentPage > 1) showPage(currentPage - 1);
+        }
+
+        function nextPage() {
+            if (currentPage < documentData.pages.length) showPage(currentPage + 1);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') prevPage();
+            if (e.key === 'ArrowRight') nextPage();
+            if (e.key === '+' || e.key === '=') zoomIn();
+            if (e.key === '-') zoomOut();
+        });
+
+        // Resize observer to update overlays when container size changes
+        const pageWrapper = document.getElementById('page-wrapper');
+        const resizeObserver = new ResizeObserver(() => {
+            if (documentData && currentPage) {
+                const page = documentData.pages.find(p => p.sequence_number === currentPage);
+                if (page && imageNaturalWidth > 0) {
+                    renderOverlays(page);
+                }
+            }
+        });
+        resizeObserver.observe(pageWrapper);
+
+        // Sidebar resizer
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('sidebar-resizer');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('dragging');
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        // Info panel resizer
+        const infoPanel = document.getElementById('info-panel');
+        const infoResizer = document.getElementById('info-resizer');
+        let isResizingInfo = false;
+
+        infoResizer.addEventListener('mousedown', (e) => {
+            isResizingInfo = true;
+            infoResizer.classList.add('dragging');
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        // Combined mousemove for both resizers
+        document.addEventListener('mousemove', (e) => {
+            if (isResizing) {
+                const newWidth = e.clientX;
+                if (newWidth >= 150 && newWidth <= 500) {
+                    sidebar.style.width = newWidth + 'px';
+                }
+            }
+            if (isResizingInfo) {
+                const newWidth = window.innerWidth - e.clientX;
+                if (newWidth >= 200 && newWidth <= 600) {
+                    infoPanel.style.width = newWidth + 'px';
+                }
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                resizer.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                // Re-render overlays after resize
+                const page = documentData?.pages.find(p => p.sequence_number === currentPage);
+                if (page) setTimeout(() => renderOverlays(page), 50);
+            }
+            if (isResizingInfo) {
+                isResizingInfo = false;
+                infoResizer.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        loadData();
+    </script>
+</body>
+</html>
