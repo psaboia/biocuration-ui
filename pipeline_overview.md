@@ -1,5 +1,7 @@
 # PDF to Viewer Pipeline
 
+*Last updated: January 2025*
+
 The pipeline transforms a scientific PDF into an interactive web viewer with extracted data.
 
 ## Pipeline Overview
