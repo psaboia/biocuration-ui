@@ -7,6 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/konva@9/konva.min.js"></script>
     <!-- MathJax for LaTeX rendering -->
     <script>
         MathJax = {
@@ -119,6 +120,35 @@
 
         // Register the plugin globally
         Chart.register(errorBarsPlugin);
+
+        // Crosshair plugin for replotted chart — syncs with calibration hover
+        const replotCrosshairPlugin = {
+            id: 'replotCrosshair',
+            afterDraw(chart) {
+                if (typeof replotCrosshairPos === 'undefined') return;
+                if (replotCrosshairPos.x === null && replotCrosshairPos.y === null) return;
+                const { ctx, scales, chartArea } = chart;
+                if (!scales || !chartArea) return;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(233,69,96,0.75)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 3]);
+                if (replotCrosshairPos.x !== null && scales.x) {
+                    const px = scales.x.getPixelForValue(replotCrosshairPos.x);
+                    if (px >= chartArea.left && px <= chartArea.right) {
+                        ctx.beginPath(); ctx.moveTo(px, chartArea.top); ctx.lineTo(px, chartArea.bottom); ctx.stroke();
+                    }
+                }
+                if (replotCrosshairPos.y !== null && scales.y) {
+                    const py = scales.y.getPixelForValue(replotCrosshairPos.y);
+                    if (py >= chartArea.top && py <= chartArea.bottom) {
+                        ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
+                    }
+                }
+                ctx.restore();
+            }
+        };
+        Chart.register(replotCrosshairPlugin);
     </script>
     <style>
         * {
@@ -788,6 +818,121 @@
             background: #2a4a6c;
             color: #ccc;
         }
+        /* Calibration overlay on page image */
+        #calibration-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 25;
+        }
+        #calibration-layer.active {
+            pointer-events: all;
+            cursor: crosshair;
+        }
+        /* Calibration tab UI */
+        .calib-status-bar {
+            background: #0a1628;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-size: 11px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            line-height: 1.4;
+        }
+        .calib-status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #555;
+            flex-shrink: 0;
+        }
+        .calib-status-dot.calibrated { background: #2ecc71; }
+        .calib-status-dot.picking { background: #f1c40f; animation: calib-pulse 0.8s infinite; }
+        .calib-section { margin-bottom: 12px; }
+        .calib-section-title {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .calib-ref-row {
+            display: grid;
+            grid-template-columns: 68px 1fr 36px;
+            gap: 5px;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .calib-pick-btn {
+            padding: 4px 6px;
+            background: #0f3460;
+            border: none;
+            color: #eee;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 10px;
+            text-align: center;
+        }
+        .calib-pick-btn:hover { background: #1a3a5c; }
+        .calib-pick-btn.picking { background: #f39c12; color: #000; }
+        .calib-pick-btn.done { background: #27ae60; color: #fff; }
+        .calib-val-input {
+            background: #0a1628;
+            border: 1px solid #0f3460;
+            color: #eee;
+            padding: 4px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            width: 100%;
+        }
+        .calib-val-input:focus { outline: none; border-color: #3498db; }
+        .calib-point-status { font-size: 9px; color: #666; text-align: center; }
+        .calib-point-status.set { color: #27ae60; }
+        .calib-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+        .calib-btn {
+            padding: 5px 10px;
+            background: #0f3460;
+            border: none;
+            color: #eee;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .calib-btn:hover { background: #1a3a5c; }
+        .calib-btn.primary { background: #2980b9; }
+        .calib-btn.primary:hover { background: #3498db; }
+        .calib-btn.success { background: #27ae60; }
+        .calib-btn.success:hover { background: #2ecc71; color: #000; }
+        .calib-btn.danger { background: #c0392b; }
+        .calib-btn.danger:hover { background: #e74c3c; }
+        .calib-extract-section {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid #0f3460;
+        }
+        .extracted-point-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            background: #0a1628;
+            border-radius: 3px;
+            margin-bottom: 3px;
+        }
+        .extracted-point-idx { font-size: 9px; color: #555; width: 16px; flex-shrink: 0; }
+        .extracted-point-coords { font-size: 10px; color: #3498db; font-family: monospace; flex: 1; }
+        .extracted-point-remove {
+            background: none; border: none;
+            color: #e94560; cursor: pointer;
+            font-size: 13px; padding: 0 2px; line-height: 1;
+        }
+        @keyframes calib-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.25; }
+        }
     </style>
 </head>
 <body>
@@ -862,12 +1007,51 @@
                     <button class="info-tab active" data-tab="description" onclick="showInfoTab('description')">Description</button>
                     <button class="info-tab" data-tab="chart" onclick="showInfoTab('chart')">Chart Data</button>
                     <button class="info-tab" data-tab="visual" onclick="showInfoTab('visual')">Replotted</button>
+                    <button class="info-tab" data-tab="calibrate" onclick="showInfoTab('calibrate')" style="display:none">Calibrate</button>
                 </div>
                 <div class="info-content" id="info-content">
                     <div class="info-tab-content active" id="tab-description"></div>
                     <div class="info-tab-content" id="tab-chart"></div>
                     <div class="info-tab-content" id="tab-visual" style="min-height: 400px;">
                         <div style="width: 100%; height: 400px;"><canvas id="replot-canvas"></canvas></div>
+                    </div>
+                    <div class="info-tab-content" id="tab-calibrate">
+                        <div class="calib-status-bar">
+                            <div class="calib-status-dot" id="calib-dot"></div>
+                            <span id="calib-status-text">Drag the box to cover the chart plot area</span>
+                        </div>
+                        <p style="font-size:11px;color:#666;margin-bottom:10px;line-height:1.5;">
+                            Drag corners to resize &nbsp;·&nbsp; Drag the box to move
+                        </p>
+                        <div class="calib-section">
+                            <div class="calib-section-title">Axis Data Ranges</div>
+                            <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:5px;align-items:center;font-size:11px;margin-bottom:6px;">
+                                <label style="color:#888;text-align:right;padding-right:3px;">X min</label>
+                                <input class="calib-val-input" id="val-xmin" type="number" placeholder="e.g. 24">
+                                <label style="color:#888;text-align:right;padding-right:3px;">X max</label>
+                                <input class="calib-val-input" id="val-xmax" type="number" placeholder="e.g. 30">
+                            </div>
+                            <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:5px;align-items:center;font-size:11px;">
+                                <label style="color:#888;text-align:right;padding-right:3px;">Y min</label>
+                                <input class="calib-val-input" id="val-ymin" type="number" placeholder="e.g. 0">
+                                <label style="color:#888;text-align:right;padding-right:3px;">Y max</label>
+                                <input class="calib-val-input" id="val-ymax" type="number" placeholder="e.g. 16">
+                            </div>
+                        </div>
+                        <div class="calib-actions">
+                            <button class="calib-btn primary" onclick="applyCalibration()">Apply Calibration</button>
+                            <button class="calib-btn danger" onclick="resetCalibration()">Re-Calibrate</button>
+                        </div>
+                        <div class="calib-extract-section" id="calib-extract-section" style="display:none">
+                            <div class="calib-section-title">Extracted Data Points</div>
+                            <p style="font-size:11px;color:#888;margin-bottom:8px;">Click on the chart image to extract points</p>
+                            <div id="extracted-points-list"></div>
+                            <div class="calib-actions">
+                                <button class="calib-btn success" onclick="exportExtracted('json')">Export JSON</button>
+                                <button class="calib-btn primary" onclick="exportExtracted('csv')">Export CSV</button>
+                                <button class="calib-btn danger" onclick="clearExtractedPoints()">Clear All</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="empty-message" style="display: flex; align-items: center; justify-content: center; color: #666; font-style: italic; font-size: 12px; height: 100%;">
                         Click on a figure or table to pin its details
@@ -887,6 +1071,416 @@
         let pinnedOverlay = null;
         let replotCharts = []; // Array for multiple charts
         let captionMap = new Map(); // Maps global element index to caption elements
+
+        // Calibration state
+        let calibrationActive = false;
+        let calibRect = { x: 0, y: 0, w: 0, h: 0 }; // display-pixel coords of selected chart area
+        let calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+        let calibrated = false;
+        let extractedPoints = [];
+        let calibCurrentElem = null;
+        let replotCrosshairPos = { x: null, y: null };
+
+        // Konva calibration objects
+        let calibStage = null;
+        let calibGridLayer = null;
+        let calibSelectorLayer = null;
+        let calibMarkerLayer = null;
+        let calibCrosshairLayer = null;
+        let calibCVLine = null;
+        let calibCHLine = null;
+        let calibTooltipBg = null;
+        let calibTooltipTxt = null;
+        let calibSelectorRect = null;
+        let calibCornerHandles = {};
+
+        // ── Calibration functions (Konva rect selector) ────────────────────
+
+        function activateCalibration(elem) {
+            calibCurrentElem = elem;
+            calibrationActive = true;
+
+            const img = document.getElementById('page-image');
+            const w = img.offsetWidth, h = img.offsetHeight;
+
+            let container = document.getElementById('konva-calib-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'konva-calib-container';
+                container.style.cssText = 'position:absolute;top:0;left:0;z-index:25;cursor:crosshair;';
+                document.getElementById('page-wrapper').appendChild(container);
+
+                calibStage = new Konva.Stage({ container: 'konva-calib-container', width: w, height: h });
+                calibGridLayer = new Konva.Layer();
+                calibSelectorLayer = new Konva.Layer();
+                calibMarkerLayer = new Konva.Layer();
+                calibCrosshairLayer = new Konva.Layer({ listening: false });
+                calibStage.add(calibGridLayer, calibSelectorLayer, calibMarkerLayer, calibCrosshairLayer);
+
+                calibCVLine = new Konva.Line({ stroke: 'rgba(233,69,96,0.85)', strokeWidth: 1, dash: [6,3], listening: false, visible: false });
+                calibCHLine = new Konva.Line({ stroke: 'rgba(233,69,96,0.85)', strokeWidth: 1, dash: [6,3], listening: false, visible: false });
+                calibTooltipBg = new Konva.Rect({ fill: 'rgba(0,0,0,0.78)', cornerRadius: 3, listening: false, visible: false });
+                calibTooltipTxt = new Konva.Text({ fill: 'white', fontSize: 11, fontFamily: 'monospace', listening: false, visible: false });
+                calibCrosshairLayer.add(calibCVLine, calibCHLine, calibTooltipBg, calibTooltipTxt);
+
+                calibStage.on('mousemove', handleKonvaMouseMove);
+                calibStage.on('click', handleKonvaClick);
+                calibStage.on('mouseleave', handleKonvaMouseLeave);
+
+                initSelectorRect(elem, w, h);
+            } else {
+                calibStage.width(w); calibStage.height(h);
+            }
+
+            container.style.width = w + 'px';
+            container.style.height = h + 'px';
+            container.style.pointerEvents = 'all';
+
+            calibGridLayer.destroyChildren();
+            drawFigureBoundsKonva(elem);
+            if (calibrated) drawGridlinesKonva();
+            redrawExtractedMarkersKonva();
+            calibStage.batchDraw();
+            updateCalibStatusBar();
+        }
+
+        function initSelectorRect(elem, stageW, stageH) {
+            let rx, ry, rw, rh;
+            if (elem && elem.bounding_boxes && elem.bounding_boxes[0]) {
+                const box = elem.bounding_boxes[0];
+                const img = document.getElementById('page-image');
+                const sx = img.offsetWidth / imageNaturalWidth, sy = img.offsetHeight / imageNaturalHeight;
+                const inset = 20;
+                rx = box.x1 * sx + inset; ry = box.y1 * sy + inset;
+                rw = (box.x2 - box.x1) * sx - inset * 2; rh = (box.y2 - box.y1) * sy - inset * 2;
+            } else {
+                rx = stageW * 0.1; ry = stageH * 0.1; rw = stageW * 0.8; rh = stageH * 0.8;
+            }
+            calibRect = { x: rx, y: ry, w: Math.max(rw, 20), h: Math.max(rh, 20) };
+            buildSelectorKonva();
+        }
+
+        function buildSelectorKonva() {
+            calibSelectorLayer.destroyChildren();
+            const { x, y, w, h } = calibRect;
+
+            calibSelectorRect = new Konva.Rect({
+                x, y, width: w, height: h,
+                stroke: '#e94560', strokeWidth: 2, dash: [8, 4],
+                fill: 'rgba(233,69,96,0.05)', draggable: true
+            });
+
+            const cs = { fill: '#e94560', stroke: 'white', strokeWidth: 2, radius: 7, draggable: true, hitStrokeWidth: 14 };
+            const tl = new Konva.Circle({ ...cs, x, y, name: 'tl' });
+            const tr = new Konva.Circle({ ...cs, x: x + w, y, name: 'tr' });
+            const bl = new Konva.Circle({ ...cs, x, y: y + h, name: 'bl' });
+            const br = new Konva.Circle({ ...cs, x: x + w, y: y + h, name: 'br' });
+            calibCornerHandles = { tl, tr, bl, br };
+
+            function syncFromCorners() {
+                const nx = tl.x(), ny = tl.y(), nw = tr.x() - tl.x(), nh = bl.y() - tl.y();
+                calibSelectorRect.setAttrs({ x: nx, y: ny, width: nw, height: nh });
+                calibRect = { x: nx, y: ny, w: nw, h: nh };
+                calibSelectorLayer.batchDraw();
+                if (calibrated) { calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); drawGridlinesKonva(); calibGridLayer.batchDraw(); }
+            }
+
+            tl.on('dragmove', () => { const x = Math.min(tl.x(), br.x()-20), y = Math.min(tl.y(), br.y()-20); tl.position({x,y}); tr.y(y); bl.x(x); syncFromCorners(); });
+            tr.on('dragmove', () => { const x = Math.max(tr.x(), bl.x()+20), y = Math.min(tr.y(), bl.y()-20); tr.position({x,y}); tl.y(y); br.x(x); syncFromCorners(); });
+            bl.on('dragmove', () => { const x = Math.min(bl.x(), tr.x()-20), y = Math.max(bl.y(), tl.y()+20); bl.position({x,y}); tl.x(x); br.y(y); syncFromCorners(); });
+            br.on('dragmove', () => { const x = Math.max(br.x(), tl.x()+20), y = Math.max(br.y(), tl.y()+20); br.position({x,y}); tr.x(x); bl.y(y); syncFromCorners(); });
+
+            calibSelectorRect.on('dragmove', () => {
+                const pos = calibSelectorRect.position();
+                tl.position({ x: pos.x, y: pos.y });
+                tr.position({ x: pos.x + calibSelectorRect.width(), y: pos.y });
+                bl.position({ x: pos.x, y: pos.y + calibSelectorRect.height() });
+                br.position({ x: pos.x + calibSelectorRect.width(), y: pos.y + calibSelectorRect.height() });
+                calibRect = { x: pos.x, y: pos.y, w: calibSelectorRect.width(), h: calibSelectorRect.height() };
+                if (calibrated) { calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); drawGridlinesKonva(); calibGridLayer.batchDraw(); }
+                calibSelectorLayer.batchDraw();
+            });
+
+            [tl, tr, bl, br].forEach(h => {
+                h.on('mouseenter', () => { calibStage.container().style.cursor = 'grab'; });
+                h.on('mouseleave', () => { calibStage.container().style.cursor = 'crosshair'; });
+                h.on('dragstart', () => { calibStage.container().style.cursor = 'grabbing'; });
+                h.on('dragend', () => { calibStage.container().style.cursor = 'crosshair'; });
+            });
+            calibSelectorRect.on('mouseenter', () => { calibStage.container().style.cursor = 'move'; });
+            calibSelectorRect.on('mouseleave', () => { calibStage.container().style.cursor = 'crosshair'; });
+
+            calibSelectorLayer.add(calibSelectorRect, tl, tr, bl, br);
+            calibSelectorLayer.batchDraw();
+        }
+
+        function deactivateCalibration() {
+            calibrationActive = false;
+            const container = document.getElementById('konva-calib-container');
+            if (container) container.style.pointerEvents = 'none';
+            if (calibCVLine) calibCVLine.visible(false);
+            if (calibCHLine) calibCHLine.visible(false);
+            if (calibTooltipBg) calibTooltipBg.visible(false);
+            if (calibTooltipTxt) calibTooltipTxt.visible(false);
+            if (calibCrosshairLayer) calibCrosshairLayer.batchDraw();
+            replotCrosshairPos = { x: null, y: null };
+            replotCharts.forEach(c => c.draw && c.draw());
+        }
+
+        function clearCalibration() {
+            deactivateCalibration();
+            if (calibStage) { calibStage.destroy(); calibStage = null; }
+            const container = document.getElementById('konva-calib-container');
+            if (container) container.remove();
+            calibGridLayer = null; calibSelectorLayer = null; calibMarkerLayer = null; calibCrosshairLayer = null;
+            calibCVLine = null; calibCHLine = null; calibTooltipBg = null; calibTooltipTxt = null;
+            calibSelectorRect = null; calibCornerHandles = {};
+            calibCurrentElem = null; calibrated = false;
+            calibRect = { x: 0, y: 0, w: 0, h: 0 };
+            calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+            extractedPoints = [];
+        }
+
+        function redrawCalibIfActive() {
+            if (!calibrationActive || !calibCurrentElem || !calibStage) return;
+            const img = document.getElementById('page-image');
+            const newW = img.offsetWidth, newH = img.offsetHeight;
+            const oldW = calibStage.width(), oldH = calibStage.height();
+            if (oldW > 0 && oldH > 0 && (oldW !== newW || oldH !== newH)) {
+                calibRect = { x: calibRect.x * newW / oldW, y: calibRect.y * newH / oldH, w: calibRect.w * newW / oldW, h: calibRect.h * newH / oldH };
+            }
+            calibStage.width(newW); calibStage.height(newH);
+            const container = document.getElementById('konva-calib-container');
+            if (container) { container.style.width = newW + 'px'; container.style.height = newH + 'px'; }
+            calibGridLayer.destroyChildren();
+            drawFigureBoundsKonva(calibCurrentElem);
+            if (calibrated) drawGridlinesKonva();
+            buildSelectorKonva();
+            calibMarkerLayer.destroyChildren();
+            redrawExtractedMarkersKonva();
+            calibStage.batchDraw();
+        }
+
+        function handleKonvaMouseMove() {
+            const pos = calibStage.getPointerPosition();
+            if (!pos) return;
+            const img = document.getElementById('page-image');
+            const natX = pos.x * imageNaturalWidth / img.offsetWidth;
+            const natY = pos.y * imageNaturalHeight / img.offsetHeight;
+            updateKonvaCrosshair(pos.x, pos.y, natX, natY);
+        }
+
+        function handleKonvaMouseLeave() {
+            if (calibCVLine) calibCVLine.visible(false);
+            if (calibCHLine) calibCHLine.visible(false);
+            if (calibTooltipBg) calibTooltipBg.visible(false);
+            if (calibTooltipTxt) calibTooltipTxt.visible(false);
+            if (calibCrosshairLayer) calibCrosshairLayer.batchDraw();
+            replotCrosshairPos = { x: null, y: null };
+            replotCharts.forEach(c => c.draw && c.draw());
+        }
+
+        function handleKonvaClick(e) {
+            if (e.target !== calibStage) return; // only stage background (not rect/corners)
+            if (!calibrated) return;
+            const pos = calibStage.getPointerPosition();
+            if (!pos) return;
+            const img = document.getElementById('page-image');
+            const dataX = pixelToDataX(pos.x * imageNaturalWidth / img.offsetWidth);
+            const dataY = pixelToDataY(pos.y * imageNaturalHeight / img.offsetHeight);
+            extractedPoints.push({ x: parseFloat(dataX.toFixed(4)), y: parseFloat(dataY.toFixed(4)) });
+            updateExtractedPointsList();
+            redrawExtractedMarkersKonva();
+            calibMarkerLayer.batchDraw();
+        }
+
+        function updateKonvaCrosshair(dispX, dispY, natX, natY) {
+            const w = calibStage.width(), h = calibStage.height();
+            calibCVLine.points([dispX, 0, dispX, h]); calibCVLine.visible(true);
+            calibCHLine.points([0, dispY, w, dispY]); calibCHLine.visible(true);
+
+            let label;
+            if (calibrated) {
+                const dataX = pixelToDataX(natX), dataY = pixelToDataY(natY);
+                label = `X: ${dataX.toFixed(3)}   Y: ${dataY.toFixed(3)}`;
+                replotCrosshairPos = { x: dataX, y: dataY };
+                replotCharts.forEach(c => c.draw && c.draw());
+            } else {
+                label = `px (${Math.round(natX)}, ${Math.round(natY)})`;
+                replotCrosshairPos = { x: null, y: null };
+            }
+
+            calibTooltipTxt.text(label); calibTooltipTxt.visible(true);
+            const pad = 5, tw = calibTooltipTxt.width() + pad * 2, th = calibTooltipTxt.height() + pad * 2;
+            let tx = dispX + 14, ty = dispY - th - 8;
+            if (tx + tw > w - 4) tx = dispX - tw - 14;
+            if (ty < 4) ty = dispY + 10;
+            calibTooltipTxt.position({ x: tx + pad, y: ty + pad });
+            calibTooltipBg.position({ x: tx, y: ty }); calibTooltipBg.size({ width: tw, height: th }); calibTooltipBg.visible(true);
+            calibCrosshairLayer.batchDraw();
+        }
+
+        function pixelToDataX(natX) {
+            const img = document.getElementById('page-image');
+            const dispX = natX * img.offsetWidth / imageNaturalWidth;
+            return calibValues.xMin + (dispX - calibRect.x) * (calibValues.xMax - calibValues.xMin) / calibRect.w;
+        }
+
+        function pixelToDataY(natY) {
+            const img = document.getElementById('page-image');
+            const dispY = natY * img.offsetHeight / imageNaturalHeight;
+            // Y inverted: top of rect = yMax, bottom = yMin
+            return calibValues.yMax - (dispY - calibRect.y) * (calibValues.yMax - calibValues.yMin) / calibRect.h;
+        }
+
+        function dataToDispX(dataX) {
+            return calibRect.x + (dataX - calibValues.xMin) * calibRect.w / (calibValues.xMax - calibValues.xMin);
+        }
+
+        function dataToDispY(dataY) {
+            return calibRect.y + (calibValues.yMax - dataY) * calibRect.h / (calibValues.yMax - calibValues.yMin);
+        }
+
+        function applyCalibration() {
+            const xMin = parseFloat(document.getElementById('val-xmin').value);
+            const xMax = parseFloat(document.getElementById('val-xmax').value);
+            const yMin = parseFloat(document.getElementById('val-ymin').value);
+            const yMax = parseFloat(document.getElementById('val-ymax').value);
+            if (isNaN(xMin) || isNaN(xMax)) { updateCalibStatusBar('Enter valid X min and X max values'); return; }
+            if (isNaN(yMin) || isNaN(yMax)) { updateCalibStatusBar('Enter valid Y min and Y max values'); return; }
+            if (xMin >= xMax) { updateCalibStatusBar('X min must be less than X max'); return; }
+            if (yMin >= yMax) { updateCalibStatusBar('Y min must be less than Y max'); return; }
+            if (calibRect.w < 20 || calibRect.h < 20) { updateCalibStatusBar('Resize the box to cover the chart area first'); return; }
+            calibValues = { xMin, xMax, yMin, yMax };
+            calibrated = true;
+            updateCalibStatusBar();
+            document.getElementById('calib-extract-section').style.display = '';
+            calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); drawGridlinesKonva(); calibGridLayer.batchDraw();
+        }
+
+        function resetCalibration() {
+            calibrated = false;
+            calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+            extractedPoints = [];
+            ['xmin','xmax','ymin','ymax'].forEach(k => { document.getElementById(`val-${k}`).value = ''; });
+            document.getElementById('calib-extract-section').style.display = 'none';
+            document.getElementById('extracted-points-list').innerHTML = '';
+            updateCalibStatusBar();
+            replotCrosshairPos = { x: null, y: null };
+            replotCharts.forEach(c => c.draw && c.draw());
+            if (calibCurrentElem && calibStage) {
+                calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); calibGridLayer.batchDraw();
+                calibMarkerLayer.destroyChildren(); calibMarkerLayer.batchDraw();
+                initSelectorRect(calibCurrentElem, calibStage.width(), calibStage.height());
+            }
+        }
+
+        function updateCalibStatusBar(msg) {
+            const dot = document.getElementById('calib-dot');
+            const txt = document.getElementById('calib-status-text');
+            if (!dot || !txt) return;
+            if (msg) { txt.textContent = msg; return; }
+            if (calibrated) {
+                dot.className = 'calib-status-dot calibrated';
+                txt.textContent = 'Calibrated — hover to read coords · click to extract points';
+            } else {
+                dot.className = 'calib-status-dot';
+                txt.textContent = 'Drag the box to cover the chart plot area, then enter axis ranges';
+            }
+        }
+
+        function drawFigureBoundsKonva(elem) {
+            if (!elem || !elem.bounding_boxes || !elem.bounding_boxes[0]) return;
+            const box = elem.bounding_boxes[0];
+            const img = document.getElementById('page-image');
+            const sx = img.offsetWidth / imageNaturalWidth, sy = img.offsetHeight / imageNaturalHeight;
+            calibGridLayer.add(new Konva.Rect({
+                x: box.x1 * sx, y: box.y1 * sy, width: (box.x2 - box.x1) * sx, height: (box.y2 - box.y1) * sy,
+                fill: 'rgba(233,69,96,0.02)', stroke: 'rgba(233,69,96,0.3)', strokeWidth: 1.5, dash: [5,3], listening: false
+            }));
+            calibGridLayer.batchDraw();
+        }
+
+        function drawGridlinesKonva() {
+            if (!calibrated || calibRect.w < 20) return;
+            function niceTicks(mn, mx, count) {
+                const range = mx - mn || 1, raw = range / count;
+                const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+                const step = mag * Math.ceil(raw / mag);
+                const ticks = [];
+                for (let t = Math.ceil(mn / step) * step; t <= mx + step * 0.001; t = parseFloat((t + step).toFixed(10))) ticks.push(t);
+                return ticks;
+            }
+            niceTicks(calibValues.xMin, calibValues.xMax, 6).forEach(v => {
+                const dx = dataToDispX(v);
+                calibGridLayer.add(new Konva.Line({ points: [dx, calibRect.y, dx, calibRect.y + calibRect.h], stroke: 'rgba(52,152,219,0.4)', strokeWidth: 0.75, dash: [3,3], listening: false }));
+                calibGridLayer.add(new Konva.Text({ x: dx - 14, y: calibRect.y + calibRect.h + 3, width: 28, text: String(v), fontSize: 9, fontFamily: 'monospace', fill: 'rgba(52,152,219,0.85)', align: 'center', listening: false }));
+            });
+            niceTicks(calibValues.yMin, calibValues.yMax, 6).forEach(v => {
+                const dy = dataToDispY(v);
+                calibGridLayer.add(new Konva.Line({ points: [calibRect.x, dy, calibRect.x + calibRect.w, dy], stroke: 'rgba(52,152,219,0.4)', strokeWidth: 0.75, dash: [3,3], listening: false }));
+                calibGridLayer.add(new Konva.Text({ x: calibRect.x - 34, y: dy - 6, width: 32, text: String(v), fontSize: 9, fontFamily: 'monospace', fill: 'rgba(52,152,219,0.85)', align: 'right', listening: false }));
+            });
+            calibGridLayer.batchDraw();
+        }
+
+        function redrawExtractedMarkersKonva() {
+            calibMarkerLayer.destroyChildren();
+            if (!calibrated) return;
+            extractedPoints.forEach((pt, idx) => {
+                const dx = dataToDispX(pt.x), dy = dataToDispY(pt.y);
+                calibMarkerLayer.add(new Konva.Circle({ x: dx, y: dy, radius: 5, fill: 'rgba(46,204,113,0.85)', stroke: '#2ecc71', strokeWidth: 1.5, listening: false }));
+                calibMarkerLayer.add(new Konva.Text({ x: dx + 7, y: dy - 5, text: String(idx + 1), fontSize: 9, fontFamily: 'monospace', fill: '#2ecc71', shadowColor: 'black', shadowBlur: 2, shadowOpacity: 0.7, listening: false }));
+            });
+            calibMarkerLayer.batchDraw();
+        }
+
+        function updateExtractedPointsList() {
+            const list = document.getElementById('extracted-points-list');
+            if (!list) return;
+            list.innerHTML = '';
+            extractedPoints.forEach((pt, idx) => {
+                const item = document.createElement('div');
+                item.className = 'extracted-point-item';
+                item.innerHTML = `<span class="extracted-point-idx">#${idx + 1}</span>
+                    <span class="extracted-point-coords">X: ${pt.x}  Y: ${pt.y}</span>
+                    <button class="extracted-point-remove" onclick="removeExtractedPoint(${idx})">✕</button>`;
+                list.appendChild(item);
+            });
+        }
+
+        function removeExtractedPoint(idx) {
+            extractedPoints.splice(idx, 1);
+            updateExtractedPointsList();
+            redrawExtractedMarkersKonva();
+            calibMarkerLayer.batchDraw();
+        }
+
+        function clearExtractedPoints() {
+            extractedPoints = [];
+            updateExtractedPointsList();
+            redrawExtractedMarkersKonva();
+            calibMarkerLayer.batchDraw();
+        }
+
+        function exportExtracted(format) {
+            if (!extractedPoints.length) { alert('No data points extracted yet.'); return; }
+            let content, filename, type;
+            if (format === 'json') {
+                content = JSON.stringify({ calibration: { rect: calibRect, ...calibValues }, points: extractedPoints }, null, 2);
+                filename = 'extracted_data.json'; type = 'application/json';
+            } else {
+                content = 'x,y\n' + extractedPoints.map(p => `${p.x},${p.y}`).join('\n');
+                filename = 'extracted_data.csv'; type = 'text/csv';
+            }
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // ── End calibration functions ──────────────────────────────────────
 
         async function loadData() {
             const response = await fetch('processed_document.json');
@@ -1143,6 +1737,7 @@
                 pinnedElement = null;
                 pinnedOverlay = null;
                 document.getElementById('unpin-btn').classList.remove('visible');
+                clearCalibration();
             }
 
             // Update page list
@@ -1216,6 +1811,9 @@
 
             // Render section markers for sections starting on this page
             renderSectionMarkers(page, scaleX, scaleY);
+
+            // Redraw calibration overlay if active
+            if (calibrationActive && calibCurrentElem) redrawCalibIfActive();
         }
 
         function getSectionsStartingOnPage(pageNum) {
@@ -1374,10 +1972,8 @@
         }
 
         function pinElement(elem, overlay) {
-            // Unpin previous
-            if (pinnedOverlay) {
-                pinnedOverlay.classList.remove('pinned');
-            }
+            if (pinnedOverlay) pinnedOverlay.classList.remove('pinned');
+            clearCalibration();
 
             // Pin new element
             pinnedElement = elem;
@@ -1392,33 +1988,29 @@
         }
 
         function unpinElement() {
-            if (pinnedOverlay) {
-                pinnedOverlay.classList.remove('pinned');
-            }
+            if (pinnedOverlay) pinnedOverlay.classList.remove('pinned');
             pinnedElement = null;
             pinnedOverlay = null;
-
-            // Hide unpin button
             document.getElementById('unpin-btn').classList.remove('visible');
-
-            // Clear info panel
+            clearCalibration();
             clearInfoPanel();
         }
 
         function showInfoTab(tabName) {
-            // Update tab buttons
             document.querySelectorAll('.info-tab').forEach(tab => {
                 tab.classList.remove('active');
-                if (tab.dataset.tab === tabName) {
-                    tab.classList.add('active');
-                }
+                if (tab.dataset.tab === tabName) tab.classList.add('active');
             });
-
-            // Update tab content
             document.querySelectorAll('.info-tab-content').forEach(content => {
                 content.classList.remove('active');
             });
             document.getElementById(`tab-${tabName}`).classList.add('active');
+
+            if (tabName === 'calibrate') {
+                if (pinnedElement) activateCalibration(pinnedElement);
+            } else {
+                deactivateCalibration();
+            }
         }
 
         function showParsedContent(elem, isPinned = false) {
@@ -1470,13 +2062,16 @@
 
             // Build chart data tab content - only show for charts
             const chartTab = document.querySelector('.info-tab[data-tab="chart"]');
+            const calibTab = document.querySelector('.info-tab[data-tab="calibrate"]');
             if (elem.chart_data) {
                 chartTab.style.display = '';
                 chartTab.classList.remove('disabled');
                 document.getElementById('tab-chart').innerHTML = formatChartData(elem.chart_data);
+                calibTab.style.display = '';
             } else {
                 chartTab.style.display = 'none';
                 document.getElementById('tab-chart').innerHTML = '';
+                calibTab.style.display = 'none';
             }
 
             // Build visual/replotted tab content
@@ -1998,6 +2593,7 @@
         }
 
         function clearInfoPanel() {
+            document.querySelector('.info-tab[data-tab="calibrate"]').style.display = 'none';
             const title = document.getElementById('info-title');
             const tabs = document.getElementById('info-tabs');
             const emptyMsg = document.querySelector('.empty-message');
