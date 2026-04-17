@@ -1356,6 +1356,11 @@
             updateCalibStatusBar();
             document.getElementById('calib-extract-section').style.display = '';
             calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); drawGridlinesKonva(); calibGridLayer.batchDraw();
+            
+            // Auto-switch to replotted tab after calibration
+            setTimeout(() => {
+                showInfoTab('visual');
+            }, 100);
         }
 
         function resetCalibration() {
@@ -2080,13 +2085,13 @@
                 visualTab.classList.remove('disabled');
                 visualTab.textContent = 'Replotted';
                 // Render chart when tab is shown
-                renderReplotChart(elem.chart_data, captionMap.get(elem._globalIndex) || [], elem.id);
+                renderReplotChart(elem.chart_data, captions, elem.id);
             } else if (elem.parsed_content) {
                 // For non-chart elements with parsed content, show as OCR
                 visualTab.classList.remove('disabled');
                 visualTab.textContent = 'OCR Data';
                 const tabVisual = document.getElementById('tab-visual');
-                const elemCaptions = captionMap.get(elem._globalIndex) || [];
+                const elemCaptions = captions;
 
                 let contentHtml = '<div style="background: white; border-radius: 6px; padding: 10px; color: #333;">';
                 if (elem.parsed_content.trim().startsWith('<table>')) {
