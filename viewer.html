@@ -1376,15 +1376,20 @@
         function autoPopulateCalibFromJSON(elem) {
             if (!elem || !elem.chart_data) return false;
             const cd = elem.chart_data;
-            const xMin = cd.x_axis_min, xMax = cd.x_axis_max;
-            const yMin = cd.Left_Y_axis_min, yMax = cd.Left_Y_axis_max;
+            const xTickArr = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
+            const yTickArr = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
+            // Derive bounds from tick arrays when explicit min/max are absent
+            let xMin = cd.x_axis_min ?? (xTickArr ? Math.min(...xTickArr) : null);
+            let xMax = cd.x_axis_max ?? (xTickArr ? Math.max(...xTickArr) : null);
+            let yMin = cd.Left_Y_axis_min ?? (yTickArr ? Math.min(...yTickArr) : null);
+            let yMax = cd.Left_Y_axis_max ?? (yTickArr ? Math.max(...yTickArr) : null);
             if (xMin == null || xMax == null || yMin == null || yMax == null) return false;
             document.getElementById('val-xmin').value = xMin;
             document.getElementById('val-xmax').value = xMax;
-            document.getElementById('val-ymin').value = yMin != null ? yMin : '';
-            document.getElementById('val-ymax').value = yMax != null ? yMax : '';
-            calibXTicks = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
-            calibYTicks = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
+            document.getElementById('val-ymin').value = yMin;
+            document.getElementById('val-ymax').value = yMax;
+            calibXTicks = xTickArr;
+            calibYTicks = yTickArr;
             return true;
         }
 
@@ -2502,14 +2507,15 @@
                     chartJsType = 'pie';
                 }
 
-                const xMin = chart.x_axis_min;
-                const xMax = chart.x_axis_max;
-                const yMin = chart.Left_Y_axis_min;
-                const yMax = chart.Left_Y_axis_max;
-                const xInterval = chart.x_axis_interval || undefined;
-                const yInterval = chart.y_axis_interval || undefined;
                 const xTicks = Array.isArray(chart.x_axis_ticks) && chart.x_axis_ticks.length ? chart.x_axis_ticks : null;
                 const yTicks = Array.isArray(chart.y_axis_ticks) && chart.y_axis_ticks.length ? chart.y_axis_ticks : null;
+                // Fall back to tick range when explicit min/max are absent
+                const xMin = chart.x_axis_min ?? (xTicks ? Math.min(...xTicks) : undefined);
+                const xMax = chart.x_axis_max ?? (xTicks ? Math.max(...xTicks) : undefined);
+                const yMin = chart.Left_Y_axis_min ?? (yTicks ? Math.min(...yTicks) : undefined);
+                const yMax = chart.Left_Y_axis_max ?? (yTicks ? Math.max(...yTicks) : undefined);
+                const xInterval = chart.x_axis_interval || undefined;
+                const yInterval = chart.y_axis_interval || undefined;
 
                 // For bar charts, transform data to use categorical labels
                 let chartData = { datasets };
