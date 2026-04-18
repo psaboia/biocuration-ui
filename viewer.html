@@ -149,7 +149,11 @@
                 if (replotCrosshairPos.x !== null && replotCrosshairPos.y !== null && scales.x && scales.y) {
                     const px = scales.x.getPixelForValue(replotCrosshairPos.x);
                     const py = scales.y.getPixelForValue(replotCrosshairPos.y);
-                    const label = `X: ${replotCrosshairPos.x.toFixed(3)}   Y: ${replotCrosshairPos.y.toFixed(3)}`;
+                    // For categorical bar charts replotCrosshairPos.x is an index — resolve to label
+                    const xDisplay = (typeof calibIsBarChart !== 'undefined' && calibIsBarChart && calibXTicks)
+                        ? String(calibXTicks[Math.round(replotCrosshairPos.x)] ?? replotCrosshairPos.x)
+                        : replotCrosshairPos.x.toFixed(3);
+                    const label = `X: ${xDisplay}   Y: ${replotCrosshairPos.y.toFixed(3)}`;
                     ctx.save();
                     ctx.setLineDash([]);
                     ctx.font = '11px monospace';
@@ -1044,11 +1048,14 @@
                         </p>
                         <div class="calib-section">
                             <div class="calib-section-title">Axis Data Ranges</div>
-                            <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:5px;align-items:center;font-size:11px;margin-bottom:6px;">
+                            <div id="calib-x-range-row" style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:5px;align-items:center;font-size:11px;margin-bottom:6px;">
                                 <label style="color:#888;text-align:right;padding-right:3px;">X min</label>
                                 <input class="calib-val-input" id="val-xmin" type="number" placeholder="e.g. 24">
                                 <label style="color:#888;text-align:right;padding-right:3px;">X max</label>
                                 <input class="calib-val-input" id="val-xmax" type="number" placeholder="e.g. 30">
+                            </div>
+                            <div id="calib-x-categorical" style="display:none;font-size:11px;color:#555;margin-bottom:6px;padding:4px 8px;background:rgba(52,152,219,0.08);border-radius:3px;border-left:2px solid rgba(52,152,219,0.5);">
+                                <span style="color:#888;">X categories:</span> <span id="calib-x-cat-list"></span>
                             </div>
                             <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:5px;align-items:center;font-size:11px;">
                                 <label style="color:#888;text-align:right;padding-right:3px;">Y min</label>
@@ -1097,6 +1104,7 @@
         let calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
         let calibXTicks = null; // exact tick values from JSON x_axis_ticks
         let calibYTicks = null; // exact tick values from JSON y_axis_ticks
+        let calibIsBarChart = false; // true when x-axis is categorical (bar/column/histogram)
         let calibrated = false;
         let extractedPoints = [];
         let calibCurrentElem = null;
@@ -1269,7 +1277,8 @@
             calibCurrentElem = null; calibrated = false;
             calibRect = { x: 0, y: 0, w: 0, h: 0 };
             calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
-            calibXTicks = null; calibYTicks = null;
+            calibXTicks = null; calibYTicks = null; calibIsBarChart = false;
+            resetXAxisUI();
             extractedPoints = [];
         }
 
@@ -1320,7 +1329,8 @@
             const img = document.getElementById('page-image');
             const dataX = pixelToDataX(pos.x * imageNaturalWidth / img.offsetWidth);
             const dataY = pixelToDataY(pos.y * imageNaturalHeight / img.offsetHeight);
-            extractedPoints.push({ x: parseFloat(dataX.toFixed(4)), y: parseFloat(dataY.toFixed(4)) });
+            const xVal = calibIsBarChart ? dataX : parseFloat(dataX.toFixed(4));
+            extractedPoints.push({ x: xVal, y: parseFloat(dataY.toFixed(4)) });
             updateExtractedPointsList();
             redrawExtractedMarkersKonva();
             calibMarkerLayer.batchDraw();
@@ -1334,8 +1344,13 @@
             let label;
             if (calibrated) {
                 const dataX = pixelToDataX(natX), dataY = pixelToDataY(natY);
-                label = `X: ${dataX.toFixed(3)}   Y: ${dataY.toFixed(3)}`;
-                replotCrosshairPos = { x: dataX, y: dataY };
+                const xLabel = calibIsBarChart ? String(dataX) : dataX.toFixed(3);
+                label = `X: ${xLabel}   Y: ${dataY.toFixed(3)}`;
+                // For bar charts store the category index so Chart.js categorical scale can use it
+                const replotX = (calibIsBarChart && calibXTicks)
+                    ? calibXTicks.indexOf(dataX)
+                    : dataX;
+                replotCrosshairPos = { x: replotX, y: dataY };
                 replotCharts.forEach(c => c.draw && c.draw());
             } else {
                 label = `px (${Math.round(natX)}, ${Math.round(natY)})`;
@@ -1355,6 +1370,12 @@
         function pixelToDataX(natX) {
             const img = document.getElementById('page-image');
             const dispX = natX * img.offsetWidth / imageNaturalWidth;
+            if (calibIsBarChart && calibXTicks && calibXTicks.length) {
+                const N = calibXTicks.length;
+                const floatIdx = (dispX - calibRect.x) / calibRect.w * N - 0.5;
+                const idx = Math.max(0, Math.min(N - 1, Math.round(floatIdx)));
+                return calibXTicks[idx];
+            }
             return calibValues.xMin + (dispX - calibRect.x) * (calibValues.xMax - calibValues.xMin) / calibRect.w;
         }
 
@@ -1366,6 +1387,12 @@
         }
 
         function dataToDispX(dataX) {
+            if (calibIsBarChart && calibXTicks && calibXTicks.length) {
+                const N = calibXTicks.length;
+                const idx = calibXTicks.indexOf(dataX);
+                if (idx === -1) return calibRect.x; // unknown category — fall back to left edge
+                return calibRect.x + (idx + 0.5) / N * calibRect.w;
+            }
             return calibRect.x + (dataX - calibValues.xMin) * calibRect.w / (calibValues.xMax - calibValues.xMin);
         }
 
@@ -1373,42 +1400,72 @@
             return calibRect.y + (calibValues.yMax - dataY) * calibRect.h / (calibValues.yMax - calibValues.yMin);
         }
 
+        function setXAxisCategoricalUI(ticks) {
+            document.getElementById('calib-x-range-row').style.display = 'none';
+            document.getElementById('calib-x-categorical').style.display = '';
+            document.getElementById('calib-x-cat-list').textContent = ticks.join(', ');
+        }
+
+        function resetXAxisUI() {
+            document.getElementById('calib-x-range-row').style.display = '';
+            document.getElementById('calib-x-categorical').style.display = 'none';
+            document.getElementById('val-xmin').value = '';
+            document.getElementById('val-xmax').value = '';
+        }
+
         function autoPopulateCalibFromJSON(elem) {
             if (!elem || !elem.chart_data) return false;
             const cd = elem.chart_data;
+            const chartType = (cd.Chart_Type || '').toLowerCase();
             const xTickArr = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
             const yTickArr = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
-            // Derive bounds from tick arrays when explicit min/max are absent
-            let xMin = cd.x_axis_min ?? (xTickArr ? Math.min(...xTickArr) : null);
-            let xMax = cd.x_axis_max ?? (xTickArr ? Math.max(...xTickArr) : null);
-            let yMin = cd.Left_Y_axis_min ?? (yTickArr ? Math.min(...yTickArr) : null);
-            let yMax = cd.Left_Y_axis_max ?? (yTickArr ? Math.max(...yTickArr) : null);
-            if (xMin == null || xMax == null || yMin == null || yMax == null) return false;
-            document.getElementById('val-xmin').value = xMin;
-            document.getElementById('val-xmax').value = xMax;
-            document.getElementById('val-ymin').value = yMin;
-            document.getElementById('val-ymax').value = yMax;
+            const isBar = (chartType.includes('bar') || chartType.includes('column') || chartType.includes('histogram')) && !!xTickArr;
+
             calibXTicks = xTickArr;
             calibYTicks = yTickArr;
+            calibIsBarChart = isBar;
+
+            let yMin = cd.Left_Y_axis_min ?? (yTickArr ? Math.min(...yTickArr) : null);
+            let yMax = cd.Left_Y_axis_max ?? (yTickArr ? Math.max(...yTickArr) : null);
+            if (yMin == null || yMax == null) return false;
+
+            document.getElementById('val-ymin').value = yMin;
+            document.getElementById('val-ymax').value = yMax;
+
+            if (isBar) {
+                setXAxisCategoricalUI(xTickArr);
+            } else {
+                let xMin = cd.x_axis_min ?? (xTickArr ? Math.min(...xTickArr) : null);
+                let xMax = cd.x_axis_max ?? (xTickArr ? Math.max(...xTickArr) : null);
+                if (xMin == null || xMax == null) return false;
+                document.getElementById('val-xmin').value = xMin;
+                document.getElementById('val-xmax').value = xMax;
+            }
             return true;
         }
 
         function applyCalibration() {
-            const xMin = parseFloat(document.getElementById('val-xmin').value);
-            const xMax = parseFloat(document.getElementById('val-xmax').value);
-            const yMin = parseFloat(document.getElementById('val-ymin').value);
-            const yMax = parseFloat(document.getElementById('val-ymax').value);
-            if (isNaN(xMin) || isNaN(xMax)) { updateCalibStatusBar('Enter valid X min and X max values'); return; }
-            if (isNaN(yMin) || isNaN(yMax)) { updateCalibStatusBar('Enter valid Y min and Y max values'); return; }
-            if (xMin >= xMax) { updateCalibStatusBar('X min must be less than X max'); return; }
-            if (yMin >= yMax) { updateCalibStatusBar('Y min must be less than Y max'); return; }
-            if (calibRect.w < 20 || calibRect.h < 20) { updateCalibStatusBar('Resize the box to cover the chart area first'); return; }
-            calibValues = { xMin, xMax, yMin, yMax };
             if (calibCurrentElem && calibCurrentElem.chart_data) {
                 const cd = calibCurrentElem.chart_data;
-                calibXTicks = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
-                calibYTicks = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
+                const ct = (cd.Chart_Type || '').toLowerCase();
+                calibXTicks = calibXTicks || (Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null);
+                calibYTicks = calibYTicks || (Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null);
+                calibIsBarChart = (ct.includes('bar') || ct.includes('column') || ct.includes('histogram')) && !!calibXTicks;
             }
+            const yMin = parseFloat(document.getElementById('val-ymin').value);
+            const yMax = parseFloat(document.getElementById('val-ymax').value);
+            if (isNaN(yMin) || isNaN(yMax)) { updateCalibStatusBar('Enter valid Y min and Y max values'); return; }
+            if (yMin >= yMax) { updateCalibStatusBar('Y min must be less than Y max'); return; }
+            if (calibRect.w < 20 || calibRect.h < 20) { updateCalibStatusBar('Resize the box to cover the chart area first'); return; }
+
+            let xMin = null, xMax = null;
+            if (!calibIsBarChart) {
+                xMin = parseFloat(document.getElementById('val-xmin').value);
+                xMax = parseFloat(document.getElementById('val-xmax').value);
+                if (isNaN(xMin) || isNaN(xMax)) { updateCalibStatusBar('Enter valid X min and X max values'); return; }
+                if (xMin >= xMax) { updateCalibStatusBar('X min must be less than X max'); return; }
+            }
+            calibValues = { xMin, xMax, yMin, yMax };
             calibrated = true;
             updateCalibStatusBar();
             document.getElementById('calib-extract-section').style.display = '';
@@ -1424,7 +1481,8 @@
         function resetCalibration() {
             calibrated = false;
             calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
-            calibXTicks = null; calibYTicks = null;
+            calibXTicks = null; calibYTicks = null; calibIsBarChart = false;
+            resetXAxisUI();
             extractedPoints = [];
             ['xmin','xmax','ymin','ymax'].forEach(k => { document.getElementById(`val-${k}`).value = ''; });
             document.getElementById('calib-extract-section').style.display = 'none';
@@ -2652,13 +2710,23 @@
                     const xScale = chartInstance.scales.x;
                     const yScale = chartInstance.scales.y;
                     if (!xScale || !yScale) return;
-                    const dataX = xScale.getValueForPixel(mx);
                     const dataY = yScale.getValueForPixel(my);
-                    replotCrosshairPos = { x: dataX, y: dataY };
-                    replotCharts.forEach(c => c.draw && c.draw());
                     const img = document.getElementById('page-image');
                     if (!img) return;
-                    const dispX = dataToDispX(dataX);
+
+                    let replotX, dispX;
+                    if (calibIsBarChart && calibXTicks && calibXTicks.length) {
+                        // Category axis: getValueForPixel returns a float index
+                        const floatIdx = xScale.getValueForPixel(mx);
+                        const idx = Math.max(0, Math.min(calibXTicks.length - 1, Math.round(floatIdx)));
+                        replotX = idx; // index for Chart.js getPixelForValue
+                        dispX = dataToDispX(calibXTicks[idx]); // index-based Konva position
+                    } else {
+                        replotX = xScale.getValueForPixel(mx);
+                        dispX = dataToDispX(replotX);
+                    }
+                    replotCrosshairPos = { x: replotX, y: dataY };
+                    replotCharts.forEach(c => c.draw && c.draw());
                     const dispY = dataToDispY(dataY);
                     const natX = dispX * imageNaturalWidth / img.offsetWidth;
                     const natY = dispY * imageNaturalHeight / img.offsetHeight;
