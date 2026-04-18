@@ -1095,6 +1095,8 @@
         let calibrationActive = false;
         let calibRect = { x: 0, y: 0, w: 0, h: 0 }; // display-pixel coords of selected chart area
         let calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+        let calibXTicks = null; // exact tick values from JSON x_axis_ticks
+        let calibYTicks = null; // exact tick values from JSON y_axis_ticks
         let calibrated = false;
         let extractedPoints = [];
         let calibCurrentElem = null;
@@ -1267,6 +1269,7 @@
             calibCurrentElem = null; calibrated = false;
             calibRect = { x: 0, y: 0, w: 0, h: 0 };
             calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+            calibXTicks = null; calibYTicks = null;
             extractedPoints = [];
         }
 
@@ -1380,6 +1383,8 @@
             document.getElementById('val-xmax').value = xMax;
             document.getElementById('val-ymin').value = yMin != null ? yMin : '';
             document.getElementById('val-ymax').value = yMax != null ? yMax : '';
+            calibXTicks = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
+            calibYTicks = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
             return true;
         }
 
@@ -1394,6 +1399,11 @@
             if (yMin >= yMax) { updateCalibStatusBar('Y min must be less than Y max'); return; }
             if (calibRect.w < 20 || calibRect.h < 20) { updateCalibStatusBar('Resize the box to cover the chart area first'); return; }
             calibValues = { xMin, xMax, yMin, yMax };
+            if (calibCurrentElem && calibCurrentElem.chart_data) {
+                const cd = calibCurrentElem.chart_data;
+                calibXTicks = Array.isArray(cd.x_axis_ticks) && cd.x_axis_ticks.length ? cd.x_axis_ticks : null;
+                calibYTicks = Array.isArray(cd.y_axis_ticks) && cd.y_axis_ticks.length ? cd.y_axis_ticks : null;
+            }
             calibrated = true;
             updateCalibStatusBar();
             document.getElementById('calib-extract-section').style.display = '';
@@ -1409,6 +1419,7 @@
         function resetCalibration() {
             calibrated = false;
             calibValues = { xMin: null, xMax: null, yMin: null, yMax: null };
+            calibXTicks = null; calibYTicks = null;
             extractedPoints = [];
             ['xmin','xmax','ymin','ymax'].forEach(k => { document.getElementById(`val-${k}`).value = ''; });
             document.getElementById('calib-extract-section').style.display = 'none';
@@ -1460,12 +1471,14 @@
                 for (let t = Math.ceil(mn / step) * step; t <= mx + step * 0.001; t = parseFloat((t + step).toFixed(10))) ticks.push(t);
                 return ticks;
             }
-            niceTicks(calibValues.xMin, calibValues.xMax, 6).forEach(v => {
+            const xTickVals = calibXTicks || niceTicks(calibValues.xMin, calibValues.xMax, 6);
+            const yTickVals = calibYTicks || niceTicks(calibValues.yMin, calibValues.yMax, 6);
+            xTickVals.forEach(v => {
                 const dx = dataToDispX(v);
                 calibGridLayer.add(new Konva.Line({ points: [dx, calibRect.y, dx, calibRect.y + calibRect.h], stroke: 'rgba(52,152,219,0.4)', strokeWidth: 0.75, dash: [3,3], listening: false }));
                 calibGridLayer.add(new Konva.Text({ x: dx - 14, y: calibRect.y + calibRect.h + 3, width: 28, text: String(v), fontSize: 9, fontFamily: 'monospace', fill: 'rgba(52,152,219,0.85)', align: 'center', listening: false }));
             });
-            niceTicks(calibValues.yMin, calibValues.yMax, 6).forEach(v => {
+            yTickVals.forEach(v => {
                 const dy = dataToDispY(v);
                 calibGridLayer.add(new Konva.Line({ points: [calibRect.x, dy, calibRect.x + calibRect.w, dy], stroke: 'rgba(52,152,219,0.4)', strokeWidth: 0.75, dash: [3,3], listening: false }));
                 calibGridLayer.add(new Konva.Text({ x: calibRect.x - 34, y: dy - 6, width: 32, text: String(v), fontSize: 9, fontFamily: 'monospace', fill: 'rgba(52,152,219,0.85)', align: 'right', listening: false }));
