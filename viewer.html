@@ -145,6 +145,25 @@
                         ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
                     }
                 }
+                // Coordinate tooltip at crosshair intersection
+                if (replotCrosshairPos.x !== null && replotCrosshairPos.y !== null && scales.x && scales.y) {
+                    const px = scales.x.getPixelForValue(replotCrosshairPos.x);
+                    const py = scales.y.getPixelForValue(replotCrosshairPos.y);
+                    const label = `X: ${replotCrosshairPos.x.toFixed(3)}   Y: ${replotCrosshairPos.y.toFixed(3)}`;
+                    ctx.save();
+                    ctx.setLineDash([]);
+                    ctx.font = '11px monospace';
+                    const tw = ctx.measureText(label).width;
+                    const th = 11, pad = 5;
+                    let tx = px + 14, ty = py - th - pad * 2 - 6;
+                    if (tx + tw + pad * 2 > chartArea.right) tx = px - tw - pad * 2 - 14;
+                    if (ty < chartArea.top) ty = py + 10;
+                    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+                    ctx.fillRect(tx - pad, ty - pad, tw + pad * 2, th + pad * 2);
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(label, tx, ty + th);
+                    ctx.restore();
+                }
                 ctx.restore();
             }
         };
