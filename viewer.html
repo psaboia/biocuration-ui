@@ -1223,7 +1223,11 @@
         function deactivateCalibration() {
             calibrationActive = false;
             const container = document.getElementById('konva-calib-container');
-            if (container) container.style.pointerEvents = 'none';
+            // Keep pointer events active when calibrated so crosshairs still track on the original image
+            if (container) {
+                container.style.pointerEvents = calibrated ? 'all' : 'none';
+                if (calibrated) container.style.cursor = 'crosshair';
+            }
             if (calibCVLine) calibCVLine.visible(false);
             if (calibCHLine) calibCHLine.visible(false);
             if (calibTooltipBg) calibTooltipBg.visible(false);
