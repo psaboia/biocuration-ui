@@ -2476,6 +2476,8 @@
                 const yMax = chart.Left_Y_axis_max;
                 const xInterval = chart.x_axis_interval || undefined;
                 const yInterval = chart.y_axis_interval || undefined;
+                const xTicks = Array.isArray(chart.x_axis_ticks) && chart.x_axis_ticks.length ? chart.x_axis_ticks : null;
+                const yTicks = Array.isArray(chart.y_axis_ticks) && chart.y_axis_ticks.length ? chart.y_axis_ticks : null;
 
                 // For bar charts, transform data to use categorical labels
                 let chartData = { datasets };
@@ -2490,6 +2492,7 @@
                     },
                     ticks: { color: '#555', stepSize: xInterval },
                     grid: { color: '#ddd' },
+                    ...(xTicks ? { afterBuildTicks: scale => { scale.ticks = xTicks.map(v => ({ value: v })); } } : {}),
                 };
 
                 if (isBarChart) {
@@ -2594,6 +2597,7 @@
                                 },
                                 ticks: { color: '#555', stepSize: yInterval },
                                 grid: { color: '#ddd' },
+                                ...(yTicks ? { afterBuildTicks: scale => { scale.ticks = yTicks.map(v => ({ value: v })); } } : {}),
                             }
                         } : undefined,
                     }
