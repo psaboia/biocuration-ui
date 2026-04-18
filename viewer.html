@@ -2474,6 +2474,8 @@
                 const xMax = chart.x_axis_max;
                 const yMin = chart.Left_Y_axis_min;
                 const yMax = chart.Left_Y_axis_max;
+                const xInterval = chart.x_axis_interval || undefined;
+                const yInterval = chart.y_axis_interval || undefined;
 
                 // For bar charts, transform data to use categorical labels
                 let chartData = { datasets };
@@ -2486,7 +2488,7 @@
                         text: chart.x_axis_label || '',
                         color: '#333',
                     },
-                    ticks: { color: '#555' },
+                    ticks: { color: '#555', stepSize: xInterval },
                     grid: { color: '#ddd' },
                 };
 
@@ -2590,7 +2592,7 @@
                                     text: chart.y_axis_label || '',
                                     color: '#333',
                                 },
-                                ticks: { color: '#555' },
+                                ticks: { color: '#555', stepSize: yInterval },
                                 grid: { color: '#ddd' },
                             }
                         } : undefined,
