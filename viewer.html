@@ -1139,7 +1139,7 @@
             const fromJSON = autoPopulateCalibFromJSON(elem);
             const hintEl = document.getElementById('calib-hint');
             if (hintEl) hintEl.innerHTML = fromJSON
-                ? 'Axis ranges loaded from JSON &nbsp;·&nbsp; Drag the box corners to align with the plot area'
+                ? 'Axis ranges pre-filled from JSON &nbsp;·&nbsp; Edit if needed, then click <strong>Apply Calibration</strong>'
                 : 'Drag corners to resize &nbsp;·&nbsp; Drag the box to move &nbsp;·&nbsp; Enter axis ranges below';
 
             calibGridLayer.destroyChildren();
@@ -1353,14 +1353,10 @@
             const xMin = cd.x_axis_min, xMax = cd.x_axis_max;
             const yMin = cd.Left_Y_axis_min, yMax = cd.Left_Y_axis_max;
             if (xMin == null || xMax == null || yMin == null || yMax == null) return false;
-            if (xMin >= xMax || yMin >= yMax) return false;
             document.getElementById('val-xmin').value = xMin;
             document.getElementById('val-xmax').value = xMax;
-            document.getElementById('val-ymin').value = yMin;
-            document.getElementById('val-ymax').value = yMax;
-            calibValues = { xMin, xMax, yMin, yMax };
-            calibrated = true;
-            document.getElementById('calib-extract-section').style.display = '';
+            document.getElementById('val-ymin').value = yMin != null ? yMin : '';
+            document.getElementById('val-ymax').value = yMax != null ? yMax : '';
             return true;
         }
 
@@ -1378,6 +1374,7 @@
             calibrated = true;
             updateCalibStatusBar();
             document.getElementById('calib-extract-section').style.display = '';
+            calibSelectorLayer.hide(); calibSelectorLayer.batchDraw();
             calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); drawGridlinesKonva(); calibGridLayer.batchDraw();
             
             // Auto-switch to replotted tab after calibration
@@ -1397,6 +1394,7 @@
             replotCrosshairPos = { x: null, y: null };
             replotCharts.forEach(c => c.draw && c.draw());
             if (calibCurrentElem && calibStage) {
+                calibSelectorLayer.show();
                 calibGridLayer.destroyChildren(); drawFigureBoundsKonva(calibCurrentElem); calibGridLayer.batchDraw();
                 calibMarkerLayer.destroyChildren(); calibMarkerLayer.batchDraw();
                 initSelectorRect(calibCurrentElem, calibStage.width(), calibStage.height());
@@ -2595,6 +2593,38 @@
                     }
                 });
                 replotCharts.push(chartInstance);
+
+                // Reverse sync: hovering replotted chart → crosshair on the original image
+                const chartCanvas = ctx.canvas;
+                chartCanvas.addEventListener('mousemove', (e) => {
+                    if (!calibrated || !calibStage) return;
+                    const rect = chartCanvas.getBoundingClientRect();
+                    const mx = e.clientX - rect.left;
+                    const my = e.clientY - rect.top;
+                    const xScale = chartInstance.scales.x;
+                    const yScale = chartInstance.scales.y;
+                    if (!xScale || !yScale) return;
+                    const dataX = xScale.getValueForPixel(mx);
+                    const dataY = yScale.getValueForPixel(my);
+                    replotCrosshairPos = { x: dataX, y: dataY };
+                    replotCharts.forEach(c => c.draw && c.draw());
+                    const img = document.getElementById('page-image');
+                    if (!img) return;
+                    const dispX = dataToDispX(dataX);
+                    const dispY = dataToDispY(dataY);
+                    const natX = dispX * imageNaturalWidth / img.offsetWidth;
+                    const natY = dispY * imageNaturalHeight / img.offsetHeight;
+                    updateKonvaCrosshair(dispX, dispY, natX, natY);
+                });
+                chartCanvas.addEventListener('mouseleave', () => {
+                    replotCrosshairPos = { x: null, y: null };
+                    replotCharts.forEach(c => c.draw && c.draw());
+                    if (calibCVLine) calibCVLine.visible(false);
+                    if (calibCHLine) calibCHLine.visible(false);
+                    if (calibTooltipBg) calibTooltipBg.visible(false);
+                    if (calibTooltipTxt) calibTooltipTxt.visible(false);
+                    if (calibCrosshairLayer) calibCrosshairLayer.batchDraw();
+                });
             });
         }
 
