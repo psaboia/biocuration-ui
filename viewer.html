@@ -1020,7 +1020,7 @@
                             <div class="calib-status-dot" id="calib-dot"></div>
                             <span id="calib-status-text">Drag the box to cover the chart plot area</span>
                         </div>
-                        <p style="font-size:11px;color:#666;margin-bottom:10px;line-height:1.5;">
+                        <p id="calib-hint" style="font-size:11px;color:#666;margin-bottom:10px;line-height:1.5;">
                             Drag corners to resize &nbsp;·&nbsp; Drag the box to move
                         </p>
                         <div class="calib-section">
@@ -1135,6 +1135,12 @@
             container.style.width = w + 'px';
             container.style.height = h + 'px';
             container.style.pointerEvents = 'all';
+
+            const fromJSON = autoPopulateCalibFromJSON(elem);
+            const hintEl = document.getElementById('calib-hint');
+            if (hintEl) hintEl.innerHTML = fromJSON
+                ? 'Axis ranges loaded from JSON &nbsp;·&nbsp; Drag the box corners to align with the plot area'
+                : 'Drag corners to resize &nbsp;·&nbsp; Drag the box to move &nbsp;·&nbsp; Enter axis ranges below';
 
             calibGridLayer.destroyChildren();
             drawFigureBoundsKonva(elem);
@@ -1339,6 +1345,23 @@
 
         function dataToDispY(dataY) {
             return calibRect.y + (calibValues.yMax - dataY) * calibRect.h / (calibValues.yMax - calibValues.yMin);
+        }
+
+        function autoPopulateCalibFromJSON(elem) {
+            if (!elem || !elem.chart_data) return false;
+            const cd = elem.chart_data;
+            const xMin = cd.x_axis_min, xMax = cd.x_axis_max;
+            const yMin = cd.Left_Y_axis_min, yMax = cd.Left_Y_axis_max;
+            if (xMin == null || xMax == null || yMin == null || yMax == null) return false;
+            if (xMin >= xMax || yMin >= yMax) return false;
+            document.getElementById('val-xmin').value = xMin;
+            document.getElementById('val-xmax').value = xMax;
+            document.getElementById('val-ymin').value = yMin;
+            document.getElementById('val-ymax').value = yMax;
+            calibValues = { xMin, xMax, yMin, yMax };
+            calibrated = true;
+            document.getElementById('calib-extract-section').style.display = '';
+            return true;
         }
 
         function applyCalibration() {
