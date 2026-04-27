@@ -841,6 +841,60 @@
             background: #2a4a6c;
             color: #ccc;
         }
+        .chart-edit-bar {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1a3a5c;
+        }
+        .chart-edit-btn {
+            padding: 4px 10px;
+            border: none;
+            border-radius: 3px;
+            font-size: 10px;
+            cursor: pointer;
+        }
+        .chart-edit-btn.edit { background: #1a3a5c; color: #7ec8e3; }
+        .chart-edit-btn.edit:hover { background: #2a4a6c; }
+        .chart-edit-btn.save { background: #1a5c3a; color: #7ee3b0; }
+        .chart-edit-btn.save:hover { background: #226b47; }
+        .chart-edit-btn.cancel { background: #3a2a1a; color: #e3c07e; }
+        .chart-edit-btn.cancel:hover { background: #4c3820; }
+        .chart-pt-input {
+            width: 72px;
+            background: #0f2035;
+            border: 1px solid #2a5a8c;
+            color: #ccc;
+            padding: 2px 4px;
+            font-size: 10px;
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+        .chart-pt-input:focus { outline: none; border-color: #4a9cd6; }
+        .chart-pt-delete-btn {
+            background: none;
+            border: none;
+            color: #e94560;
+            cursor: pointer;
+            font-size: 11px;
+            padding: 1px 4px;
+            line-height: 1;
+        }
+        .chart-pt-delete-btn:hover { color: #ff6b6b; }
+        .chart-add-pt-btn {
+            background: #1a3a5c;
+            border: none;
+            color: #7ec8e3;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+            margin-top: 5px;
+            width: 100%;
+            text-align: left;
+        }
+        .chart-add-pt-btn:hover { background: #2a4a6c; }
         /* Calibration overlay on page image */
         #calibration-layer {
             position: absolute;
@@ -1109,6 +1163,8 @@
         let extractedPoints = [];
         let calibCurrentElem = null;
         let replotCrosshairPos = { x: null, y: null };
+        let currentDisplayedElement = null;
+        let chartDataEditMode = false;
 
         // Konva calibration objects
         let calibStage = null;
@@ -1996,10 +2052,22 @@
             });
         }
 
-        function formatChartData(chartData) {
+        function formatChartData(chartData, editMode = false) {
             // Handle array of charts (composite) or single chart
             const charts = Array.isArray(chartData) ? chartData : [chartData];
             let html = '';
+
+            // Edit / Save-Cancel bar
+            if (editMode) {
+                html += '<div class="chart-edit-bar">'
+                    + '<button class="chart-edit-btn save" onclick="saveChartDataEdits()">Save</button>'
+                    + '<button class="chart-edit-btn cancel" onclick="cancelChartDataEdit()">Cancel</button>'
+                    + '</div>';
+            } else {
+                html += '<div class="chart-edit-bar">'
+                    + '<button class="chart-edit-btn edit" onclick="enterChartDataEditMode()">Edit</button>'
+                    + '</div>';
+            }
 
             charts.forEach((chart, chartIdx) => {
                 if (charts.length > 1) {
@@ -2056,6 +2124,9 @@
                         }
                     });
 
+                    // Escape series name for use as an HTML attribute value
+                    const escAttr = s => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
                     seriesMap.forEach((seriesData, seriesName) => {
                         // Check if points have varying colors
                         const colors = seriesData.points.map(p => p.color).filter(c => c);
@@ -2070,22 +2141,44 @@
                         html += `<span class="chart-series-count">(${seriesData.points.length} points)</span>`;
                         html += '</div>';
 
-                        // Show data points - first few visible, rest hidden initially
-                        const maxShow = 5;
-                        const showColorCol = hasVaryingColors;
-                        html += `<table class="chart-data-table"><thead><tr>${showColorCol ? '<th></th>' : ''}<th>X</th><th>Y</th></tr></thead><tbody>`;
-                        seriesData.points.forEach((p, idx) => {
-                            const xVal = typeof p.x === 'number' ? p.x.toFixed(2) : p.x;
-                            const yVal = typeof p.y === 'number' ? p.y.toFixed(2) : p.y;
-                            const colorCell = showColorCol ? `<td><div class="chart-series-color" style="background: ${p.color || '#999'}; margin: 0;"></div></td>` : '';
-                            const hiddenStyle = idx >= maxShow ? ' class="hidden-row" style="display: none;"' : '';
-                            html += `<tr${hiddenStyle}>${colorCell}<td>${xVal}</td><td>${yVal}</td></tr>`;
-                        });
-                        html += '</tbody></table>';
+                        if (editMode) {
+                            // Editable table: inputs + delete buttons, all rows visible
+                            const showColorCol = hasVaryingColors;
+                            html += `<table class="chart-data-table" data-chart-idx="${chartIdx}" data-series-name="${escAttr(seriesName)}">`;
+                            html += `<thead><tr>${showColorCol ? '<th></th>' : ''}<th>X</th><th>Y</th><th></th></tr></thead><tbody>`;
+                            seriesData.points.forEach((p, idx) => {
+                                const xVal = typeof p.x === 'number' ? p.x : (p.x ?? '');
+                                const yVal = typeof p.y === 'number' ? p.y : (p.y ?? '');
+                                const colorCell = showColorCol
+                                    ? `<td><div class="chart-series-color" style="background: ${p.color || '#999'}; margin: 0;"></div></td>`
+                                    : '';
+                                html += `<tr data-pt-idx="${idx}">${colorCell}`
+                                    + `<td><input class="chart-pt-input" data-field="x" type="number" step="any" value="${xVal}"></td>`
+                                    + `<td><input class="chart-pt-input" data-field="y" type="number" step="any" value="${yVal}"></td>`
+                                    + `<td><button class="chart-pt-delete-btn" onclick="deleteChartPointRow(this)" title="Remove point">✕</button></td>`
+                                    + `</tr>`;
+                            });
+                            html += '</tbody></table>';
+                            html += `<button class="chart-add-pt-btn" onclick="addChartPointRow(this)">+ Add Point</button>`;
+                        } else {
+                            // Read-only table with progressive disclosure
+                            const maxShow = 5;
+                            const showColorCol = hasVaryingColors;
+                            html += `<table class="chart-data-table"><thead><tr>${showColorCol ? '<th></th>' : ''}<th>X</th><th>Y</th></tr></thead><tbody>`;
+                            seriesData.points.forEach((p, idx) => {
+                                const xVal = typeof p.x === 'number' ? p.x.toFixed(2) : p.x;
+                                const yVal = typeof p.y === 'number' ? p.y.toFixed(2) : p.y;
+                                const colorCell = showColorCol ? `<td><div class="chart-series-color" style="background: ${p.color || '#999'}; margin: 0;"></div></td>` : '';
+                                const hiddenStyle = idx >= maxShow ? ' class="hidden-row" style="display: none;"' : '';
+                                html += `<tr${hiddenStyle}>${colorCell}<td>${xVal}</td><td>${yVal}</td></tr>`;
+                            });
+                            html += '</tbody></table>';
 
-                        if (seriesData.points.length > maxShow) {
-                            html += `<button class="chart-toggle" onclick="const rows = this.parentElement.querySelectorAll('.hidden-row'); const showing = rows[0]?.style.display !== 'none'; rows.forEach(r => r.style.display = showing ? 'none' : ''); this.textContent = showing ? '... ${seriesData.points.length - maxShow} more points' : 'Show less';">... ${seriesData.points.length - maxShow} more points</button>`;
+                            if (seriesData.points.length > maxShow) {
+                                html += `<button class="chart-toggle" onclick="const rows = this.parentElement.querySelectorAll('.hidden-row'); const showing = rows[0]?.style.display !== 'none'; rows.forEach(r => r.style.display = showing ? 'none' : ''); this.textContent = showing ? '... ${seriesData.points.length - maxShow} more points' : 'Show less';">... ${seriesData.points.length - maxShow} more points</button>`;
+                            }
                         }
+
                         html += '</div>';
                     });
                 }
@@ -2094,6 +2187,91 @@
             });
 
             return html;
+        }
+
+        function enterChartDataEditMode() {
+            chartDataEditMode = true;
+            if (currentDisplayedElement?.chart_data) {
+                document.getElementById('tab-chart').innerHTML = formatChartData(currentDisplayedElement.chart_data, true);
+            }
+        }
+
+        function cancelChartDataEdit() {
+            chartDataEditMode = false;
+            if (currentDisplayedElement?.chart_data) {
+                document.getElementById('tab-chart').innerHTML = formatChartData(currentDisplayedElement.chart_data, false);
+            }
+        }
+
+        function deleteChartPointRow(btn) {
+            const row = btn.closest('tr');
+            row.style.display = 'none';
+            row.dataset.deleted = 'true';
+        }
+
+        function addChartPointRow(btn) {
+            const table = btn.previousElementSibling;
+            const tbody = table.querySelector('tbody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td><input class="chart-pt-input" data-field="x" type="number" step="any" placeholder="X"></td>'
+                + '<td><input class="chart-pt-input" data-field="y" type="number" step="any" placeholder="Y"></td>'
+                + '<td><button class="chart-pt-delete-btn" onclick="deleteChartPointRow(this)" title="Remove point">✕</button></td>';
+            tbody.appendChild(tr);
+            tr.querySelector('[data-field="x"]').focus();
+        }
+
+        function saveChartDataEdits() {
+            if (!currentDisplayedElement?.chart_data) return;
+
+            const charts = Array.isArray(currentDisplayedElement.chart_data)
+                ? currentDisplayedElement.chart_data
+                : [currentDisplayedElement.chart_data];
+
+            const tabChart = document.getElementById('tab-chart');
+
+            tabChart.querySelectorAll('.chart-data-table[data-chart-idx]').forEach(table => {
+                const chartIdx = parseInt(table.dataset.chartIdx);
+                const seriesName = table.dataset.seriesName;
+                const chart = charts[chartIdx];
+                if (!chart) return;
+
+                const newPoints = [];
+                table.querySelectorAll('tbody tr:not([data-deleted="true"])').forEach(row => {
+                    const xInput = row.querySelector('[data-field="x"]');
+                    const yInput = row.querySelector('[data-field="y"]');
+                    if (!xInput || !yInput) return;
+                    const x = parseFloat(xInput.value);
+                    const y = parseFloat(yInput.value);
+                    if (!isNaN(x) && !isNaN(y)) newPoints.push({ x, y });
+                });
+
+                const data = chart.data || [];
+                const otherItems = data.filter(item => (item.series || 'Default') !== seriesName);
+                const origItems = data.filter(item => (item.series || 'Default') === seriesName);
+                const seriesColor = origItems[0]?.color;
+
+                // Rebuild series items, reusing original item properties where possible
+                const newItems = newPoints.map((pt, i) => {
+                    const orig = origItems[i];
+                    if (orig && !orig.points && !orig.data_points) {
+                        return { ...orig, x: pt.x, y: pt.y };
+                    }
+                    return {
+                        x: pt.x, y: pt.y,
+                        series: seriesName === 'Default' ? undefined : seriesName,
+                        ...(seriesColor ? { color: seriesColor } : {})
+                    };
+                });
+
+                chart.data = [...otherItems, ...newItems];
+            });
+
+            chartDataEditMode = false;
+            document.getElementById('tab-chart').innerHTML = formatChartData(currentDisplayedElement.chart_data, false);
+
+            // Refresh the replot chart with updated data
+            const captions = captionMap.get(currentDisplayedElement._globalIndex) || [];
+            renderReplotChart(currentDisplayedElement.chart_data, captions, currentDisplayedElement.id);
         }
 
         function pinElement(elem, overlay) {
@@ -2139,6 +2317,8 @@
         }
 
         function showParsedContent(elem, isPinned = false) {
+            currentDisplayedElement = elem;
+            chartDataEditMode = false;
             const title = document.getElementById('info-title');
             const tabs = document.getElementById('info-tabs');
             const emptyMsg = document.querySelector('.empty-message');
@@ -2767,6 +2947,8 @@
         }
 
         function clearInfoPanel() {
+            currentDisplayedElement = null;
+            chartDataEditMode = false;
             document.querySelector('.info-tab[data-tab="calibrate"]').style.display = 'none';
             const title = document.getElementById('info-title');
             const tabs = document.getElementById('info-tabs');
