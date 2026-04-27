@@ -881,6 +881,10 @@
         .chart-edit-btn.save:hover { background: #226b47; }
         .chart-edit-btn.cancel { background: #3a2a1a; color: #e3c07e; }
         .chart-edit-btn.cancel:hover { background: #4c3820; }
+        .chart-edit-btn.undo, .chart-edit-btn.redo { background: #243550; color: #7ec8e3; margin-left: auto; border: 1px solid #2a4a6c; }
+        .chart-edit-btn.undo { margin-left: auto; }
+        .chart-edit-btn.undo:hover:not(.inactive), .chart-edit-btn.redo:hover:not(.inactive) { background: #2a4a6c; }
+        .chart-edit-btn.inactive { color: #4a6a88; cursor: not-allowed; border-color: #1e3048; }
         .chart-pt-input {
             width: 72px;
             background: #0f2035;
@@ -1187,6 +1191,8 @@
         let replotDragState = null;
         let currentDisplayedElement = null;
         let chartDataEditMode = false;
+        let editHistory = [];
+        let editFuture = [];
 
         // Konva calibration objects
         let calibStage = null;
@@ -2079,15 +2085,21 @@
             const charts = Array.isArray(chartData) ? chartData : [chartData];
             let html = '';
 
-            // Edit / Save-Cancel bar
+            // Edit / Save-Cancel bar with Undo/Redo
+            const undoCls = editHistory.length === 0 ? ' inactive' : '';
+            const redoCls = editFuture.length === 0 ? ' inactive' : '';
+            const undoRedo = `<button class="chart-edit-btn undo${undoCls}" id="chart-undo-btn" onclick="undoEdit()">↩ Undo</button>`
+                + `<button class="chart-edit-btn redo${redoCls}" id="chart-redo-btn" onclick="redoEdit()">↪ Redo</button>`;
             if (editMode) {
                 html += '<div class="chart-edit-bar">'
                     + '<button class="chart-edit-btn save" onclick="saveChartDataEdits()">Save</button>'
                     + '<button class="chart-edit-btn cancel" onclick="cancelChartDataEdit()">Cancel</button>'
+                    + undoRedo
                     + '</div>';
             } else {
                 html += '<div class="chart-edit-bar">'
                     + '<button class="chart-edit-btn edit" onclick="enterChartDataEditMode()">Edit</button>'
+                    + undoRedo
                     + '</div>';
             }
 
@@ -2244,6 +2256,7 @@
 
         function saveChartDataEdits() {
             if (!currentDisplayedElement?.chart_data) return;
+            pushEditHistory();
 
             const charts = Array.isArray(currentDisplayedElement.chart_data)
                 ? currentDisplayedElement.chart_data
@@ -2341,6 +2354,8 @@
         function showParsedContent(elem, isPinned = false) {
             currentDisplayedElement = elem;
             chartDataEditMode = false;
+            editHistory = [];
+            editFuture = [];
             const title = document.getElementById('info-title');
             const tabs = document.getElementById('info-tabs');
             const emptyMsg = document.querySelector('.empty-message');
@@ -2510,12 +2525,20 @@
                 html += '</div>';
             }
 
-            // Add download JSON button, Edit Points toggle, and link to Chart Data tab
+            // Add download JSON button, Edit Points toggle, undo/redo, and link to Chart Data tab
+            const rUndoInactive = editHistory.length === 0;
+            const rRedoInactive = editFuture.length === 0;
+            const btnBase = 'padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;';
+            const urBase = `${btnBase} background: #243550; border: 1px solid #3a5a7c;`;
             html += '<div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">';
-            html += '<button id="replot-edit-btn" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Edit Points</button>';
+            html += '<div style="display:flex; gap:8px; align-items:center;">';
+            html += `<button id="replot-edit-btn" style="${btnBase} background: #6c757d; color: white;">Edit Points</button>`;
+            html += `<button id="replot-undo-btn" onclick="undoEdit()" style="${urBase} color: ${rUndoInactive ? '#4a6a88' : '#7ec8e3'}; cursor: ${rUndoInactive ? 'not-allowed' : 'pointer'};">↩ Undo</button>`;
+            html += `<button id="replot-redo-btn" onclick="redoEdit()" style="${urBase} color: ${rRedoInactive ? '#4a6a88' : '#7ec8e3'}; cursor: ${rRedoInactive ? 'not-allowed' : 'pointer'};">↪ Redo</button>`;
+            html += '</div>';
             html += '<div style="display:flex; gap:10px;">';
-            html += '<button id="view-chart-data" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">View Chart Data</button>';
-            html += '<button id="download-chart-json" style="padding: 6px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Download JSON</button>';
+            html += `<button id="view-chart-data" style="${btnBase} background: #6c757d; color: white;">View Chart Data</button>`;
+            html += `<button id="download-chart-json" style="${btnBase} background: #3498db; color: white;">Download JSON</button>`;
             html += '</div></div>';
 
             html += '</div>';
@@ -3031,6 +3054,7 @@
 
         function saveReplotPointEdit(dragState) {
             if (!currentDisplayedElement?.chart_data) return;
+            pushEditHistory();
             const dataset = dragState.chartInstance.data.datasets[dragState.datasetIdx];
             const seriesName = dataset._seriesName || dataset.label;
             const origChart = dataset._origChart;
@@ -3092,6 +3116,8 @@
         function clearInfoPanel() {
             currentDisplayedElement = null;
             chartDataEditMode = false;
+            editHistory = [];
+            editFuture = [];
             document.querySelector('.info-tab[data-tab="calibrate"]').style.display = 'none';
             const title = document.getElementById('info-title');
             const tabs = document.getElementById('info-tabs');
@@ -3231,6 +3257,64 @@
                 infoResizer.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
+            }
+        });
+
+        function pushEditHistory() {
+            if (!currentDisplayedElement?.chart_data) return;
+            editHistory.push(JSON.parse(JSON.stringify(currentDisplayedElement.chart_data)));
+            if (editHistory.length > 50) editHistory.shift();
+            editFuture = [];
+            updateUndoRedoButtons();
+        }
+
+        function undoEdit() {
+            if (!editHistory.length || !currentDisplayedElement) return;
+            editFuture.push(JSON.parse(JSON.stringify(currentDisplayedElement.chart_data)));
+            currentDisplayedElement.chart_data = editHistory.pop();
+            applyRestoredChartData();
+        }
+
+        function redoEdit() {
+            if (!editFuture.length || !currentDisplayedElement) return;
+            editHistory.push(JSON.parse(JSON.stringify(currentDisplayedElement.chart_data)));
+            currentDisplayedElement.chart_data = editFuture.pop();
+            applyRestoredChartData();
+        }
+
+        function applyRestoredChartData() {
+            chartDataEditMode = false;
+            replotEditMode = false;
+            replotDragState = null;
+            document.getElementById('tab-chart').innerHTML = formatChartData(currentDisplayedElement.chart_data, false);
+            const captions = captionMap.get(currentDisplayedElement._globalIndex) || [];
+            renderReplotChart(currentDisplayedElement.chart_data, captions, currentDisplayedElement.id);
+            updateUndoRedoButtons();
+        }
+
+        function updateUndoRedoButtons() {
+            const canUndo = editHistory.length > 0;
+            const canRedo = editFuture.length > 0;
+            const activeColor = '#7ec8e3', inactiveColor = '#4a6a88';
+            // Chart Data tab buttons use CSS class
+            const chartUndo = document.getElementById('chart-undo-btn');
+            if (chartUndo) chartUndo.classList.toggle('inactive', !canUndo);
+            const chartRedo = document.getElementById('chart-redo-btn');
+            if (chartRedo) chartRedo.classList.toggle('inactive', !canRedo);
+            // Replot tab buttons use inline styles
+            const rUndo = document.getElementById('replot-undo-btn');
+            if (rUndo) { rUndo.style.color = canUndo ? activeColor : inactiveColor; rUndo.style.cursor = canUndo ? 'pointer' : 'not-allowed'; }
+            const rRedo = document.getElementById('replot-redo-btn');
+            if (rRedo) { rRedo.style.color = canRedo ? activeColor : inactiveColor; rRedo.style.cursor = canRedo ? 'pointer' : 'not-allowed'; }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+                e.preventDefault();
+                undoEdit();
+            } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+                e.preventDefault();
+                redoEdit();
             }
         });
 
