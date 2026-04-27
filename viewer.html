@@ -168,6 +168,26 @@
                     ctx.fillText(label, tx, ty + th);
                     ctx.restore();
                 }
+                // Draw dots for extracted (clicked) calibration points
+                if (typeof extractedPoints !== 'undefined' && extractedPoints.length > 0 && scales.x && scales.y) {
+                    ctx.save();
+                    ctx.setLineDash([]);
+                    extractedPoints.forEach(pt => {
+                        if (typeof calibIsBarChart !== 'undefined' && calibIsBarChart) return;
+                        const px = scales.x.getPixelForValue(pt.x);
+                        const py = scales.y.getPixelForValue(pt.y);
+                        if (px >= chartArea.left && px <= chartArea.right && py >= chartArea.top && py <= chartArea.bottom) {
+                            ctx.fillStyle = '#2ecc71';
+                            ctx.strokeStyle = '#1a7a40';
+                            ctx.lineWidth = 1.5;
+                            ctx.beginPath();
+                            ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.stroke();
+                        }
+                    });
+                    ctx.restore();
+                }
                 ctx.restore();
             }
         };
@@ -1163,6 +1183,8 @@
         let extractedPoints = [];
         let calibCurrentElem = null;
         let replotCrosshairPos = { x: null, y: null };
+        let replotEditMode = false;
+        let replotDragState = null;
         let currentDisplayedElement = null;
         let chartDataEditMode = false;
 
@@ -2488,16 +2510,21 @@
                 html += '</div>';
             }
 
-            // Add download JSON button and link to Chart Data tab
-            html += '<div style="margin-top: 15px; text-align: right; display: flex; justify-content: flex-end; gap: 10px;">';
+            // Add download JSON button, Edit Points toggle, and link to Chart Data tab
+            html += '<div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">';
+            html += '<button id="replot-edit-btn" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Edit Points</button>';
+            html += '<div style="display:flex; gap:10px;">';
             html += '<button id="view-chart-data" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">View Chart Data</button>';
             html += '<button id="download-chart-json" style="padding: 6px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Download JSON</button>';
-            html += '</div>';
+            html += '</div></div>';
 
             html += '</div>';
             tabVisual.innerHTML = html;
 
             // Setup buttons
+            replotEditMode = false;
+            replotDragState = null;
+            document.getElementById('replot-edit-btn').addEventListener('click', toggleReplotEditMode);
             document.getElementById('view-chart-data').addEventListener('click', () => {
                 showInfoTab('chart');
             });
@@ -2710,6 +2737,8 @@
 
                         datasets.push({
                             label: seriesName,
+                            _seriesName: seriesName,
+                            _origChart: chart,
                             data: seriesData.points,
                             borderColor: hasLine ? color : 'transparent',
                             // For hollow markers: transparent fill (inherits chart background), colored border
@@ -2797,6 +2826,8 @@
 
                         barDatasets.push({
                             label: seriesName,
+                            _seriesName: seriesName,
+                            _origChart: chart,
                             data: values,
                             backgroundColor: color + '99',
                             borderColor: color,
@@ -2882,11 +2913,44 @@
 
                 // Reverse sync: hovering replotted chart → crosshair on the original image
                 const chartCanvas = ctx.canvas;
-                chartCanvas.addEventListener('mousemove', (e) => {
-                    if (!calibrated || !calibStage) return;
+                chartCanvas.addEventListener('mousedown', (e) => {
+                    if (!replotEditMode) return;
                     const rect = chartCanvas.getBoundingClientRect();
                     const mx = e.clientX - rect.left;
                     const my = e.clientY - rect.top;
+                    const nearest = findNearestReplotPoint(chartInstance, mx, my);
+                    if (nearest) {
+                        replotDragState = { chartInstance, chartIdx: idx, ...nearest };
+                        chartCanvas.style.cursor = 'grabbing';
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                });
+                chartCanvas.addEventListener('mousemove', (e) => {
+                    const rect = chartCanvas.getBoundingClientRect();
+                    const mx = e.clientX - rect.left;
+                    const my = e.clientY - rect.top;
+
+                    // Handle active drag
+                    if (replotEditMode && replotDragState && replotDragState.chartInstance === chartInstance) {
+                        const { chartArea, scales } = chartInstance;
+                        const clampedMx = Math.max(chartArea.left, Math.min(chartArea.right, mx));
+                        const clampedMy = Math.max(chartArea.top, Math.min(chartArea.bottom, my));
+                        const pt = chartInstance.data.datasets[replotDragState.datasetIdx].data[replotDragState.pointIdx];
+                        pt.x = scales.x.getValueForPixel(clampedMx);
+                        pt.y = scales.y.getValueForPixel(clampedMy);
+                        chartInstance.update('none');
+                        return;
+                    }
+
+                    // Update cursor in edit mode
+                    if (replotEditMode) {
+                        const nearest = findNearestReplotPoint(chartInstance, mx, my, 12);
+                        chartCanvas.style.cursor = nearest ? 'grab' : 'default';
+                    }
+
+                    // Crosshair sync with original image
+                    if (!calibrated || !calibStage) return;
                     const xScale = chartInstance.scales.x;
                     const yScale = chartInstance.scales.y;
                     if (!xScale || !yScale) return;
@@ -2912,7 +2976,17 @@
                     const natY = dispY * imageNaturalHeight / img.offsetHeight;
                     updateKonvaCrosshair(dispX, dispY, natX, natY);
                 });
+                chartCanvas.addEventListener('mouseup', (e) => {
+                    if (!replotDragState || replotDragState.chartInstance !== chartInstance) return;
+                    saveReplotPointEdit(replotDragState);
+                    replotDragState = null;
+                    chartCanvas.style.cursor = replotEditMode ? 'grab' : 'default';
+                });
                 chartCanvas.addEventListener('mouseleave', () => {
+                    if (replotDragState && replotDragState.chartInstance === chartInstance) {
+                        saveReplotPointEdit(replotDragState);
+                        replotDragState = null;
+                    }
                     replotCrosshairPos = { x: null, y: null };
                     replotCharts.forEach(c => c.draw && c.draw());
                     if (calibCVLine) calibCVLine.visible(false);
@@ -2920,8 +2994,77 @@
                     if (calibTooltipBg) calibTooltipBg.visible(false);
                     if (calibTooltipTxt) calibTooltipTxt.visible(false);
                     if (calibCrosshairLayer) calibCrosshairLayer.batchDraw();
+                    chartCanvas.style.cursor = replotEditMode ? 'grab' : 'default';
                 });
             });
+        }
+
+        function toggleReplotEditMode() {
+            replotEditMode = !replotEditMode;
+            replotDragState = null;
+            const btn = document.getElementById('replot-edit-btn');
+            if (btn) {
+                btn.textContent = replotEditMode ? 'Done Editing' : 'Edit Points';
+                btn.style.background = replotEditMode ? '#1a5c3a' : '#6c757d';
+            }
+            replotCharts.forEach((_, i) => {
+                const canvas = document.getElementById(`replot-canvas-${i}`);
+                if (canvas) canvas.style.cursor = replotEditMode ? 'grab' : 'default';
+            });
+        }
+
+        function findNearestReplotPoint(chart, mx, my, threshold = 14) {
+            let nearest = null, minDist = threshold;
+            if (!chart.scales.x || !chart.scales.y) return null;
+            chart.data.datasets.forEach((dataset, di) => {
+                if (!Array.isArray(dataset.data)) return;
+                dataset.data.forEach((pt, pi) => {
+                    if (pt == null || typeof pt !== 'object') return;
+                    const px = chart.scales.x.getPixelForValue(pt.x);
+                    const py = chart.scales.y.getPixelForValue(pt.y);
+                    const dist = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+                    if (dist < minDist) { minDist = dist; nearest = { datasetIdx: di, pointIdx: pi }; }
+                });
+            });
+            return nearest;
+        }
+
+        function saveReplotPointEdit(dragState) {
+            if (!currentDisplayedElement?.chart_data) return;
+            const dataset = dragState.chartInstance.data.datasets[dragState.datasetIdx];
+            const seriesName = dataset._seriesName || dataset.label;
+            const origChart = dataset._origChart;
+            if (!origChart) return;
+
+            const newPt = dataset.data[dragState.pointIdx];
+            if (!newPt || typeof newPt !== 'object') return;
+
+            const origData = origChart.data || [];
+            // Try nested format first
+            const nestedItem = origData.find(item =>
+                (item.series || 'Default') === seriesName && (item.points || item.data_points)
+            );
+            if (nestedItem) {
+                const pts = nestedItem.points || nestedItem.data_points;
+                if (pts && pts[dragState.pointIdx] != null) {
+                    pts[dragState.pointIdx].x = newPt.x;
+                    pts[dragState.pointIdx].y = newPt.y;
+                }
+            } else {
+                // Flat format
+                const flatItems = origData.filter(item =>
+                    (item.series || 'Default') === seriesName && !item.points && !item.data_points
+                );
+                if (flatItems[dragState.pointIdx]) {
+                    flatItems[dragState.pointIdx].x = newPt.x;
+                    flatItems[dragState.pointIdx].y = newPt.y;
+                }
+            }
+            // Sync the chart data tab if it's active
+            const chartTabContent = document.getElementById('tab-chart');
+            if (chartTabContent && chartTabContent.classList.contains('active')) {
+                chartTabContent.innerHTML = formatChartData(currentDisplayedElement.chart_data, false);
+            }
         }
 
         function parseHtmlTable(html) {
